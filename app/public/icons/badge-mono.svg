@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <!-- Monochrome badge for Android notifications - pirate hat silhouette -->
+  <!-- Hat brim -->
+  <ellipse cx="48" cy="58" rx="38" ry="8" fill="white"/>
+  <!-- Hat body (tricorn shape) -->
+  <path d="M18 58 C18 58 24 22 48 22 C72 22 78 58 78 58 C70 50 62 44 48 44 C34 44 26 50 18 58Z" fill="white"/>
+  <!-- Skull circle -->
+  <circle cx="48" cy="36" r="8" fill="white"/>
+</svg>

@@ -1,0 +1,351 @@
+//! Output polling and subscriber management
+//!
+//! Polls tmux sessions for output changes and broadcasts to WebSocket subscribers.
+//! This is in the controller layer because it deals with I/O (WebSocket messages).
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::sync::{mpsc, RwLock};
+use tokio::task::JoinHandle;
+use tracing::{info, warn};
+
+use super::ws::messages::ServerMessage;
+use crate::model::{OutputChange, SessionStatus, SharedSessionStates};
+use crate::utils::{NtfyClient, SessionStore, TmuxClient, WebPushClient};
+
+/// Subscriber info for a session
+#[derive(Default)]
+pub struct SessionSubscribers {
+    /// Channels to send messages to subscribers
+    pub senders: Vec<mpsc::UnboundedSender<ServerMessage>>,
+}
+
+impl SessionSubscribers {
+    /// Add a new subscriber
+    pub fn add(&mut self, tx: mpsc::UnboundedSender<ServerMessage>) {
+        self.senders.push(tx);
+    }
+
+    /// Remove closed channels
+    pub fn cleanup(&mut self) {
+        self.senders.retain(|tx| !tx.is_closed());
+    }
+
+    /// Broadcast message to all subscribers
+    pub fn broadcast(&mut self, msg: ServerMessage) {
+        self.senders.retain(|tx| tx.send(msg.clone()).is_ok());
+    }
+
+    /// Get subscriber count
+    pub fn count(&self) -> usize {
+        self.senders.len()
+    }
+
+    /// Check if there are any subscribers
+    pub fn is_empty(&self) -> bool {
+        self.senders.is_empty()
+    }
+}
+
+/// Map of session ID to subscribers
+pub type SubscriberMap = Arc<RwLock<HashMap<String, SessionSubscribers>>>;
+
+/// Create a new subscriber map
+pub fn new_subscriber_map() -> SubscriberMap {
+    Arc::new(RwLock::new(HashMap::new()))
+}
+
+/// Add a subscriber for a session
+pub async fn add_subscriber(
+    subscribers: &SubscriberMap,
+    session_states: &SharedSessionStates,
+    session_id: &str,
+    tx: mpsc::UnboundedSender<ServerMessage>,
+) {
+    // Add to subscriber map
+    {
+        let mut subs = subscribers.write().await;
+        subs.entry(session_id.to_string())
+            .or_default()
+            .add(tx);
+    }
+
+    // Update subscriber count in session state
+    {
+        let subs = subscribers.read().await;
+        let count = subs.get(session_id).map(|s| s.count()).unwrap_or(0);
+
+        let mut states = session_states.write().await;
+        if let Some(state) = states.get_mut(session_id) {
+            state.subscriber_count = count;
+        }
+    }
+}
+
+/// Remove a subscriber (called when WebSocket closes)
+pub async fn remove_subscriber(
+    subscribers: &SubscriberMap,
+    session_states: &SharedSessionStates,
+    session_id: &str,
+) {
+    // Cleanup closed channels
+    {
+        let mut subs = subscribers.write().await;
+        if let Some(session_subs) = subs.get_mut(session_id) {
+            session_subs.cleanup();
+        }
+    }
+
+    // Update subscriber count in session state
+    {
+        let subs = subscribers.read().await;
+        let count = subs.get(session_id).map(|s| s.count()).unwrap_or(0);
+
+        let mut states = session_states.write().await;
+        if let Some(state) = states.get_mut(session_id) {
+            state.subscriber_count = count;
+        }
+    }
+}
+
+/// Start the output polling background task
+pub fn start_poller(
+    tmux: Arc<dyn TmuxClient>,
+    ntfy: Arc<dyn NtfyClient>,
+    push: Arc<dyn WebPushClient>,
+    session_states: SharedSessionStates,
+    subscribers: SubscriberMap,
+    session_store: Arc<dyn SessionStore>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        tracing::warn!("Output poller: Task spawned");
+        let poll_interval = Duration::from_millis(200);
+        let mut interval = tokio::time::interval(poll_interval);
+        let mut tick_count: u64 = 0;
+        // Run cleanup every ~5 seconds (25 ticks * 200ms = 5000ms)
+        let cleanup_every = 25;
+
+        info!("Output poller started");
+        tracing::warn!("Output poller: Entering main loop");
+
+        loop {
+            interval.tick().await;
+            tick_count += 1;
+
+            // Get ALL tracked session IDs (not just those with subscribers)
+            // This ensures push notifications work even when the app is closed
+            let session_ids: Vec<String> = {
+                let states = session_states.read().await;
+                states.keys().cloned().collect()
+            };
+
+            // Poll each tracked session
+            for session_id in session_ids {
+                poll_session(
+                    &session_id,
+                    &tmux,
+                    &ntfy,
+                    &push,
+                    &session_states,
+                    &subscribers,
+                    &session_store,
+                )
+                .await;
+            }
+
+            // Check for dead sessions less frequently (~every 5 seconds)
+            if tick_count.is_multiple_of(cleanup_every) {
+                cleanup_dead_sessions(&tmux, &session_states, &subscribers).await;
+            }
+        }
+    })
+}
+
+/// Poll a single session for output changes
+async fn poll_session(
+    session_id: &str,
+    tmux: &Arc<dyn TmuxClient>,
+    ntfy: &Arc<dyn NtfyClient>,
+    push: &Arc<dyn WebPushClient>,
+    session_states: &SharedSessionStates,
+    subscribers: &SubscriberMap,
+    session_store: &Arc<dyn SessionStore>,
+) {
+    // Capture current pane output
+    let output = match tmux.capture_pane(session_id, 200).await {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+
+    // Update state and check for changes
+    let (change, persisted_state): (Option<OutputChange>, Option<crate::utils::PersistedSessionState>) = {
+        let mut states = session_states.write().await;
+        let state = states.entry(session_id.to_string()).or_default();
+        let change = state.update_output(&output);
+        // Get persisted state if there was a status change
+        let persisted = if change.as_ref().is_some_and(|c| c.status_changed) {
+            Some(state.to_persisted())
+        } else {
+            None
+        };
+        (change, persisted)
+    };
+
+    // Persist state if status changed (fire-and-forget, non-blocking)
+    if let Some(persisted) = persisted_state {
+        let store = session_store.clone();
+        let sid = session_id.to_string();
+        tokio::spawn(async move {
+            if let Err(e) = store.save(&sid, &persisted).await {
+                warn!(session = %sid, error = %e, "Failed to persist session state");
+            }
+        });
+    }
+
+    // If there was a change, broadcast to subscribers
+    if let Some(change) = change {
+        let timestamp = chrono::Utc::now().to_rfc3339();
+
+        // Broadcast output if there's new content
+        if !change.new_content.is_empty() {
+            let mut subs = subscribers.write().await;
+            if let Some(session_subs) = subs.get_mut(session_id) {
+                // Broadcast full output (not diff) - works better for TUI apps like Claude Code
+                session_subs.broadcast(ServerMessage::Output {
+                    session_id: session_id.to_string(),
+                    content: output.clone(),
+                    timestamp: timestamp.clone(),
+                });
+            }
+        }
+
+        // Handle status changes separately (notifications should fire even without new content)
+        if change.status_changed {
+            info!(
+                session = %session_id,
+                old_status = %change.old_status,
+                new_status = %change.new_status,
+                "Status changed"
+            );
+
+            // Broadcast status to WebSocket subscribers
+            {
+                let mut subs = subscribers.write().await;
+                if let Some(session_subs) = subs.get_mut(session_id) {
+                    session_subs.broadcast(ServerMessage::Status {
+                        session_id: session_id.to_string(),
+                        status: change.new_status.to_string(),
+                        timestamp: timestamp.clone(),
+                    });
+                }
+            }
+
+            // Send notifications if waiting, error, or finished working
+            if matches!(change.new_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) {
+                // Send ntfy notification
+                let ntfy = ntfy.clone();
+                let sid = session_id.to_string();
+                let status = change.new_status;
+                let output_snippet = output.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = ntfy.notify(&sid, &status, &output_snippet).await {
+                        warn!(session = %sid, error = %e, "Failed to send ntfy notification");
+                    }
+                });
+
+                // Send web push notification
+                info!(session = %session_id, "Sending web push notification");
+
+                // Look up display name from session state (fall back to session_id if empty)
+                let session_name: String = {
+                    let states = session_states.read().await;
+                    states.get(session_id)
+                        .map(|s| &s.name)
+                        .filter(|n| !n.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| session_id.to_string())
+                };
+
+                let push = push.clone();
+                let sid = session_id.to_string();
+                let status = change.new_status;
+                tokio::spawn(async move {
+                    let (title, body) = match status {
+                        SessionStatus::NeedsInput => (
+                            format!("{} needs input", session_name),
+                            "Claude is waiting for your response".to_string(),
+                        ),
+                        SessionStatus::Error => (
+                            format!("{} error", session_name),
+                            "An error occurred in the session".to_string(),
+                        ),
+                        SessionStatus::Resting => (
+                            format!("{} finished", session_name),
+                            "Claude has completed the task".to_string(),
+                        ),
+                        _ => return,
+                    };
+
+                    let payload = serde_json::json!({
+                        "title": title,
+                        "body": body,
+                        "session_id": sid,
+                    });
+
+                    if let Err(e) = push.send_to_all(&payload.to_string()).await {
+                        warn!(session = %sid, error = %e, "Failed to send web push notification");
+                    } else {
+                        info!(session = %sid, "Web push notification sent");
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// Remove sessions that no longer exist in tmux
+async fn cleanup_dead_sessions(
+    tmux: &Arc<dyn TmuxClient>,
+    session_states: &SharedSessionStates,
+    subscribers: &SubscriberMap,
+) {
+    let tracked_ids: Vec<String> = {
+        let states = session_states.read().await;
+        states.keys().cloned().collect()
+    };
+
+    for session_id in tracked_ids {
+        match tmux.has_session(&session_id).await {
+            Ok(true) => {} // Session still exists
+            Ok(false) => {
+                // Session ended - notify subscribers and remove
+                let timestamp = chrono::Utc::now().to_rfc3339();
+
+                // Notify subscribers
+                {
+                    let mut subs = subscribers.write().await;
+                    if let Some(session_subs) = subs.get_mut(&session_id) {
+                        session_subs.broadcast(ServerMessage::SessionEnded {
+                            session_id: session_id.clone(),
+                            timestamp,
+                        });
+                    }
+                    subs.remove(&session_id);
+                }
+
+                // Remove from session states
+                {
+                    let mut states = session_states.write().await;
+                    states.remove(&session_id);
+                }
+
+                info!(session = %session_id, "Session ended, removed from tracking");
+            }
+            Err(e) => {
+                warn!(session = %session_id, error = %e, "Error checking session existence");
+            }
+        }
+    }
+}

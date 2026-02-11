@@ -1,0 +1,126 @@
+import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project } from '../types';
+
+const BASE_URL = '/api';
+
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    ...options,
+  });
+
+  const data = await res.json();
+
+  if (!data.success) {
+    throw new Error(data.error || 'Unknown error');
+  }
+
+  return data.data;
+}
+
+export const api = {
+  getSessions: (): Promise<{ sessions: Session[] }> =>
+    request('/sessions'),
+
+  getSession: (id: string): Promise<SessionWithOutput> =>
+    request(`/sessions/${encodeURIComponent(id)}`),
+
+  createSession: (params: CreateSessionParams): Promise<{ session: Session }> =>
+    request('/sessions', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  deleteSession: (id: string): Promise<{ killed: boolean }> =>
+    request(`/sessions/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    }),
+
+  updateSession: (id: string, params: { name?: string; project_id?: string | null }): Promise<{ name?: string; project_id?: string }> =>
+    request(`/sessions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(params),
+    }),
+
+  renameSession: (id: string, name: string): Promise<{ name?: string; project_id?: string }> =>
+    request(`/sessions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+
+  sendInput: (id: string, text: string): Promise<{ sent: boolean }> =>
+    request(`/sessions/${encodeURIComponent(id)}/input`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+
+  getFolders: (): Promise<{ folders: string[] }> =>
+    request('/folders'),
+
+  createFolder: (params: CreateFolderParams): Promise<CreateFolderResponse> =>
+    request('/folders', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  poll: (id: string): Promise<PollData> =>
+    request(`/sessions/${encodeURIComponent(id)}/poll`),
+
+  resize: (id: string, params: ResizeParams): Promise<void> =>
+    request(`/sessions/${encodeURIComponent(id)}/resize`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  sendKey: (id: string, key: string): Promise<void> =>
+    request(`/sessions/${encodeURIComponent(id)}/input`, {
+      method: 'POST',
+      body: JSON.stringify({ text: key }),
+    }),
+
+  health: (): Promise<{ status: string }> =>
+    request('/health'),
+
+  // Push notification endpoints
+  getVapidPublicKey: (): Promise<{ publicKey: string | null }> =>
+    request('/push/vapid-key'),
+
+  subscribePush: (subscription: PushSubscriptionJSON): Promise<{ subscribed: boolean }> =>
+    request('/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(subscription),
+    }),
+
+  unsubscribePush: (endpoint: string): Promise<{ unsubscribed: boolean }> =>
+    request('/push/unsubscribe', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint }),
+    }),
+
+  getCommands: (sessionId?: string): Promise<{ commands: Command[] }> => {
+    const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : '';
+    return request(`/commands${query}`);
+  },
+
+  // Project endpoints
+  getProjects: (): Promise<{ projects: Project[] }> =>
+    request('/projects'),
+
+  createProject: (name: string): Promise<{ project: Project }> =>
+    request('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  renameProject: (id: string, name: string): Promise<{ name: string }> =>
+    request(`/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteProject: (id: string): Promise<{ deleted: boolean }> =>
+    request(`/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+};

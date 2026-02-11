@@ -1,0 +1,243 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Safe area insets for notched phones */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
+/* Prevent body scroll bounce on iOS */
+html, body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Dark terminal theme — monospace everywhere */
+body {
+  @apply bg-background text-text;
+  font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+}
+
+/* Pulse animation for needs_input status */
+@keyframes pulse-status {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-pulse-status {
+  animation: pulse-status 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Glow effect for status dots */
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 4px currentColor; }
+  50% { box-shadow: 0 0 8px currentColor, 0 0 12px currentColor; }
+}
+
+.glow {
+  animation: glow 2s ease-in-out infinite;
+}
+
+/* Send flash animation */
+@keyframes send-flash {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; background-color: #00ff41; color: #0a0a0a; }
+  100% { opacity: 1; }
+}
+
+.animate-send-flash {
+  animation: send-flash 0.3s ease-out;
+}
+
+/* Safe area padding utilities */
+.pt-safe {
+  padding-top: max(1rem, var(--sat));
+}
+
+.pb-safe {
+  padding-bottom: max(1rem, var(--sab));
+}
+
+.pl-safe {
+  padding-left: max(1rem, var(--sal));
+}
+
+.pr-safe {
+  padding-right: max(1rem, var(--sar));
+}
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Touch-friendly targets */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Prevent text selection on UI elements */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Pull to refresh indicator */
+.pull-indicator {
+  @apply flex items-center justify-center;
+  transition: transform 0.2s ease-out;
+}
+
+/* Input focus styles - prevent iOS zoom */
+input, textarea, select {
+  font-size: 16px;
+  font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+}
+
+/* Button active state for touch feedback */
+.btn-active:active {
+  transform: scale(0.97);
+  opacity: 0.8;
+}
+
+/* Card hover/active states */
+.card-interactive {
+  @apply transition-all duration-150;
+}
+
+.card-interactive:active {
+  background-color: #1a1a1a;
+}
+
+/* Modal overlay */
+.modal-overlay {
+  @apply fixed inset-0 bg-black/70 flex items-center justify-center z-50;
+  backdrop-filter: blur(4px);
+}
+
+/* Loading spinner — green terminal style */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  @apply w-5 h-5 border-2 border-text-muted border-t-primary rounded-full;
+  animation: spin 0.8s linear infinite;
+}
+
+/* FAB attention pulse — amber glow for peripheral vision */
+@keyframes fab-attention-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(255, 170, 0, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(255, 170, 0, 0.8), 0 0 40px rgba(255, 170, 0, 0.3); }
+}
+
+.fab-attention {
+  animation: fab-attention-pulse 2s ease-in-out infinite;
+}
+
+/* Radial menu — key buttons fan out from center */
+@keyframes radial-key-in {
+  0% {
+    opacity: 0;
+    transform: scale(0);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.radial-key-enter {
+  opacity: 0;
+  animation: radial-key-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Outer ring — expanding circle that context keys sit on */
+@keyframes outer-ring-expand {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  80% {
+    transform: translate(-50%, -50%) scale(1.05);
+    opacity: 0.8;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.6;
+  }
+}
+
+.outer-ring-circle {
+  animation: outer-ring-expand 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Context-aware keys pop out from the ring after it expands */
+@keyframes radial-key-outer-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.radial-key-outer-enter {
+  opacity: 0;
+  animation: radial-key-outer-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Notification banner slide-in */
+@keyframes banner-slide-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.banner-slide-in {
+  animation: banner-slide-in 0.25s ease-out;
+}
+
+/* Bottom sheet slide-up animation */
+@keyframes sheet-slide-up {
+  0% {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sheet-slide-up {
+  animation: sheet-slide-up 0.25s ease-out;
+}

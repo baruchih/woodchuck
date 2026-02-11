@@ -1,0 +1,60 @@
+[package]
+name = "woodchuck"
+version = "0.1.0"
+edition = "2021"
+description = "Backend service for managing Claude Code sessions via tmux"
+authors = ["Woodchuck"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full", "signal"] }
+
+# Web framework
+axum = { version = "0.7", features = ["ws"] }
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", features = ["ring"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# HTTP client (for ntfy)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Web Push notifications
+web-push = "0.11"
+
+# Environment
+dotenvy = "0.15"
+
+# Security
+shell-escape = "0.1"
+
+# Random generation
+rand = "0.8"
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
+# URL parsing
+url = "2"
+
+# Home directory detection
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"
