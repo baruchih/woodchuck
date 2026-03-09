@@ -57,6 +57,7 @@ url = "2"
 
 # Home directory detection
 dirs = "5"
+filetime = "0.2.27"
 
 [dev-dependencies]
 tempfile = "3"

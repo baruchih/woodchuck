@@ -413,6 +413,13 @@ async fn run_full_build(repo_dir: &str) -> Result<(), String> {
 
     if output.status.success() {
         info!("Backend build succeeded");
+        // Touch the binary to ensure a fresh timestamp even for frontend-only changes,
+        // so the deploy pipeline's "newer than current" check passes.
+        let binary = Path::new(repo_dir).join("target/release/woodchuck");
+        let _ = filetime::set_file_mtime(
+            &binary,
+            filetime::FileTime::now(),
+        );
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
