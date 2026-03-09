@@ -111,6 +111,7 @@ pub fn start_ralph_loop(
         let mut auto_response_count: u32 = 0;
         let mut last_response_time = tokio::time::Instant::now();
         let mut was_working = false;
+        let mut inbox_checked = false; // prevent repeated inbox checks while idle
 
         loop {
             tokio::time::sleep(poll_interval).await;
@@ -147,6 +148,7 @@ pub fn start_ralph_loop(
             match status {
                 SessionStatus::Working => {
                     was_working = true;
+                    inbox_checked = false;
                 }
                 SessionStatus::NeedsInput => {
                     // Check iteration limit
@@ -212,14 +214,15 @@ pub fn start_ralph_loop(
                     }
                 }
                 SessionStatus::Resting => {
-                    if !was_working {
-                        // Haven't seen it work yet, skip
+                    if !was_working && inbox_checked {
+                        // Already checked inbox since last task, skip
                         continue;
                     }
 
-                    // Task finished — reset counter
+                    // Task finished (or initial idle) — reset counter
                     auto_response_count = 0;
                     was_working = false;
+                    inbox_checked = true;
 
                     // Handle on_resting behavior
                     match &config.on_resting {
