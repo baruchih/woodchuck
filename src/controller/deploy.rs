@@ -163,16 +163,20 @@ impl DeployState {
             None => return DeployResult::Failed("No new binary found at target/release/woodchuck".to_string()),
         };
 
-        // Verify new binary is newer than current
-        let new_meta = match std::fs::metadata(&new_binary) {
-            Ok(m) => m,
-            Err(e) => return DeployResult::Failed(format!("Cannot read new binary: {}", e)),
-        };
-        let cur_meta = std::fs::metadata(&self.inner.current_binary).ok();
-        if let Some(ref cur) = cur_meta {
-            if let (Ok(new_mod), Ok(cur_mod)) = (new_meta.modified(), cur.modified()) {
-                if new_mod <= cur_mod {
-                    return DeployResult::Failed("New binary is not newer than current".to_string());
+        // Verify new binary is newer than current (skip if same file, e.g. cargo run)
+        let same_file = std::fs::canonicalize(&new_binary).ok()
+            == std::fs::canonicalize(&self.inner.current_binary).ok();
+        if !same_file {
+            let new_meta = match std::fs::metadata(&new_binary) {
+                Ok(m) => m,
+                Err(e) => return DeployResult::Failed(format!("Cannot read new binary: {}", e)),
+            };
+            let cur_meta = std::fs::metadata(&self.inner.current_binary).ok();
+            if let Some(ref cur) = cur_meta {
+                if let (Ok(new_mod), Ok(cur_mod)) = (new_meta.modified(), cur.modified()) {
+                    if new_mod <= cur_mod {
+                        return DeployResult::Failed("New binary is not newer than current".to_string());
+                    }
                 }
             }
         }
