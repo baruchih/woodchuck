@@ -271,7 +271,21 @@ async fn poll_session(
             }
 
             // Send notifications if waiting, error, or finished working
-            if matches!(change.new_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) {
+            // Deduplicate: only notify if we haven't already sent for this status
+            let should_notify = matches!(change.new_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
+                let mut states = session_states.write().await;
+                if let Some(state) = states.get_mut(session_id) {
+                    if state.last_notified_status == Some(change.new_status) {
+                        false // Already notified for this status
+                    } else {
+                        state.last_notified_status = Some(change.new_status);
+                        true
+                    }
+                } else {
+                    false
+                }
+            };
+            if should_notify {
                 // Send ntfy notification (with semaphore to limit concurrency)
                 let ntfy = ntfy.clone();
                 let sid = session_id.to_string();

@@ -165,8 +165,21 @@ pub fn detect_status(output: &str) -> SessionStatus {
         .collect();
     let very_recent = lines_5.join("\n").to_lowercase();
 
-    // 1. Error patterns -- very_recent (5 lines)
-    if contains_any(&very_recent, &[
+    // Check if we're at a prompt (last real line is `>`, `❯`, or `$`)
+    let at_prompt = is_at_prompt(output);
+
+    // When at a prompt, limit pattern matching to last 2 lines instead of 5.
+    // This prevents stale patterns like "Would you like..." from previous output
+    // from incorrectly marking a resting session as NeedsInput or Error.
+    // Last 2 lines still catches genuine "question\n> " patterns.
+    let recent_text = if at_prompt {
+        lines_5.iter().take(2).map(|s| s.to_lowercase()).collect::<Vec<_>>().join("\n")
+    } else {
+        very_recent.clone()
+    };
+
+    // 1. Error patterns
+    if contains_any(&recent_text, &[
         "error:",
         "error[",
         "failed:",
@@ -179,8 +192,8 @@ pub fn detect_status(output: &str) -> SessionStatus {
         return SessionStatus::Error;
     }
 
-    // 2. NeedsInput patterns -- very_recent (5 lines)
-    if contains_any(&very_recent, &[
+    // 2. NeedsInput patterns
+    if contains_any(&recent_text, &[
         "[y/n]",
         "[yes/no]",
         "proceed?",
@@ -209,7 +222,7 @@ pub fn detect_status(output: &str) -> SessionStatus {
     }
 
     // 4. Resting -- at a prompt
-    if is_at_prompt(output) {
+    if at_prompt {
         return SessionStatus::Resting;
     }
 

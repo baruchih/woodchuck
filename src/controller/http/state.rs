@@ -153,6 +153,7 @@ impl AppState {
             let now = Utc::now();
             if new_status == SessionStatus::Working {
                 state.last_working_at = Some(now);
+                state.last_notified_status = None; // Reset so next transition will notify
                 if state.working_since.is_none() {
                     state.working_since = Some(now);
                 }
@@ -188,8 +189,23 @@ impl AppState {
             }
         }
 
-        // Send push notification if needs attention
-        if change.new_status == SessionStatus::NeedsInput || change.new_status == SessionStatus::Error {
+        // Send push notification if needs attention (with deduplication)
+        let should_notify = if change.new_status == SessionStatus::NeedsInput || change.new_status == SessionStatus::Error {
+            let mut states = self.session_states.write().await;
+            if let Some(state) = states.get_mut(session_id) {
+                if state.last_notified_status == Some(change.new_status) {
+                    false
+                } else {
+                    state.last_notified_status = Some(change.new_status);
+                    true
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if should_notify {
             let session_name = {
                 let states = self.session_states.read().await;
                 states.get(session_id)

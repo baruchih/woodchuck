@@ -47,6 +47,9 @@ pub struct SessionState {
 
     /// Whether this is the maintainer session (hidden from main list)
     pub is_maintainer: bool,
+
+    /// Last status for which a push notification was sent (deduplication)
+    pub last_notified_status: Option<SessionStatus>,
 }
 
 impl Default for SessionState {
@@ -62,6 +65,7 @@ impl Default for SessionState {
             project_id: None,
             last_input: None,
             is_maintainer: false,
+            last_notified_status: None,
         }
     }
 }
@@ -149,6 +153,7 @@ impl SessionState {
         if new_status == SessionStatus::Working {
             // Entering or continuing Working state
             self.last_working_at = Some(now);
+            self.last_notified_status = None; // Reset so next transition will notify
             if self.working_since.is_none() {
                 self.working_since = Some(now);
             }
