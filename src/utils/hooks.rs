@@ -259,8 +259,6 @@ async fn update_settings_json(settings_path: &Path, script_path: &Path) -> Resul
     Ok(())
 }
 
-/// The inbox instructions filename written inside `.claude/`
-const INBOX_INSTRUCTIONS_FILENAME: &str = "woodchuck-inbox.md";
 
 /// Marker line used to detect if inbox instructions are already present in CLAUDE.md
 const INBOX_MARKER: &str = "<!-- woodchuck-inbox -->";

@@ -3,7 +3,7 @@
 //! Handles self-upgrade: build verification, binary swap, countdown with abort,
 //! graceful re-exec, and rollback on failure.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
