@@ -6,15 +6,20 @@
 //! - **ws**: WebSocket handler for real-time streaming
 //! - **poller**: Background task for polling tmux sessions
 
+pub mod deploy;
 pub mod http;
+pub mod maintainer;
 pub mod poller;
+pub mod ralph;
 pub mod ws;
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
-use tracing::info;
+use regex::Regex;
+use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::model::{list_sessions, new_shared_states, ModelError, SessionState, SharedSessionStates};
@@ -52,6 +57,15 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
     // Discover existing tmux sessions and restore persisted names
     initialize_session_states(&tmux, &session_states, &session_store).await?;
 
+    // Create inbox directory
+    let inbox_path = maintainer::inbox_dir(&config.data_dir);
+    if let Err(e) = tokio::fs::create_dir_all(&inbox_path).await {
+        warn!(error = %e, "Failed to create inbox directory");
+    }
+
+    // Create deploy state (shared between HTTP handlers and ralph auto-deploy)
+    let deploy_state = deploy::DeployState::new(&config.data_dir);
+
     // Start HTTP server (now also serves WebSocket on /ws)
     let http_stop = http::start(
         config.clone(),
@@ -62,6 +76,7 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
         session_states.clone(),
         subscribers.clone(),
         session_store.clone(),
+        deploy_state.clone(),
     )
     .await?;
 
@@ -75,10 +90,25 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
         session_store.clone(),
     );
 
+    // Start maintainer session and ralph loop
+    let ralph_handle = start_maintainer(
+        &config,
+        &tmux,
+        &session_states,
+        &session_store,
+        deploy_state,
+        push.clone(),
+    ).await;
+
     // Return combined stop function
     let stop_fn: StopFn = Box::new(move || {
         Box::pin(async move {
             info!("Stopping controllers...");
+
+            // Stop the ralph loop
+            if let Some(handle) = ralph_handle {
+                handle.abort();
+            }
 
             // Stop the poller
             poller_handle.abort();
@@ -91,6 +121,138 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
     });
 
     Ok(stop_fn)
+}
+
+/// Start the maintainer session and ralph loop
+async fn start_maintainer(
+    config: &Arc<Config>,
+    tmux: &Arc<dyn TmuxClient>,
+    session_states: &SharedSessionStates,
+    session_store: &Arc<dyn SessionStore>,
+    deploy_state: deploy::DeployState,
+    push: Arc<dyn WebPushClient>,
+) -> Option<ralph::RalphHandle> {
+    let session_id = maintainer::MAINTAINER_SESSION_ID;
+
+    // Check if maintainer session already exists in tmux
+    let exists = match tmux.has_session(session_id).await {
+        Ok(exists) => exists,
+        Err(e) => {
+            warn!(error = %e, "Failed to check maintainer session");
+            return None;
+        }
+    };
+
+    if !exists {
+        // Find the woodchuck repo directory (parent of the data_dir, or use a config)
+        // For now, use the current working directory or a sensible default
+        let repo_dir = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| config.projects_dir.clone());
+
+        // Create the maintainer session
+        let cmd = "claude --dangerously-skip-permissions";
+        match tmux.new_session(session_id, &repo_dir, cmd).await {
+            Ok(()) => {
+                info!("Created maintainer session");
+
+                // Track in session states
+                let mut states = session_states.write().await;
+                let mut state = SessionState::with_name("Woodchuck Maintainer".to_string());
+                state.is_maintainer = true;
+                states.insert(session_id.to_string(), state);
+
+                // Persist
+                let persisted = crate::utils::PersistedSessionState {
+                    name: "Woodchuck Maintainer".to_string(),
+                    status: crate::model::SessionStatus::Working,
+                    working_since: Some(chrono::Utc::now()),
+                    last_working_at: Some(chrono::Utc::now()),
+                    project_id: None,
+                    last_input: None,
+                };
+                let store = session_store.clone();
+                let sid = session_id.to_string();
+                tokio::spawn(async move {
+                    if let Err(e) = store.save(&sid, &persisted).await {
+                        warn!(error = %e, "Failed to persist maintainer state");
+                    }
+                });
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to create maintainer session");
+                return None;
+            }
+        }
+    } else {
+        // Session exists, make sure it's tracked
+        let mut states = session_states.write().await;
+        if !states.contains_key(session_id) {
+            let mut state = SessionState::with_name("Woodchuck Maintainer".to_string());
+            state.is_maintainer = true;
+            states.insert(session_id.to_string(), state);
+        } else {
+            // Mark existing state as maintainer
+            if let Some(state) = states.get_mut(session_id) {
+                state.is_maintainer = true;
+            }
+        }
+        info!("Attached to existing maintainer session");
+    }
+
+    // Build ralph config for the maintainer
+    let inbox_path = maintainer::inbox_dir(&config.data_dir);
+
+    // Auto-deploy: monitor repo for new commits, build + deploy
+    let repo_dir = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| config.projects_dir.clone());
+    let auto_deploy = ralph::AutoDeployConfig {
+        repo_dir,
+        deploy: deploy_state,
+        push,
+        last_commit_file: std::path::PathBuf::from(&config.data_dir).join("last-deploy-commit"),
+    };
+
+    let ralph_config = ralph::RalphConfig {
+        session_id: session_id.to_string(),
+        auto_responses: vec![
+            ralph::AutoResponse {
+                pattern: Regex::new(r"(?i)\(y/n\)").unwrap(),
+                response: "y".to_string(),
+            },
+            ralph::AutoResponse {
+                pattern: Regex::new(r"(?i)Trust this").unwrap(),
+                response: "y".to_string(),
+            },
+            ralph::AutoResponse {
+                pattern: Regex::new(r"(?i)Do you want to").unwrap(),
+                response: "y".to_string(),
+            },
+            ralph::AutoResponse {
+                pattern: Regex::new(r"(?i)Would you like").unwrap(),
+                response: "y".to_string(),
+            },
+            ralph::AutoResponse {
+                pattern: Regex::new(r"Press Enter").unwrap(),
+                response: String::new(), // bare Enter
+            },
+        ],
+        max_auto_responses_per_task: 20,
+        cooldown: Duration::from_secs(3),
+        on_resting: ralph::OnResting::CheckInbox { path: inbox_path },
+        inbox_check_delay: Duration::from_secs(10),
+        auto_deploy: Some(auto_deploy),
+    };
+
+    let handle = ralph::start_ralph_loop(
+        ralph_config,
+        tmux.clone(),
+        session_states.clone(),
+    );
+
+    info!("Maintainer ralph loop started");
+    Some(handle)
 }
 
 /// Initialize session states from existing tmux sessions

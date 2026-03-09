@@ -117,6 +117,40 @@ pub async fn detect_git_branch(folder: &str) -> Option<String> {
     }
 }
 
+/// Get the current HEAD commit hash of a git repository.
+///
+/// Returns `Some(hash)` if the folder is a git repo, `None` otherwise.
+pub async fn get_head_commit(folder: &str) -> Option<String> {
+    if folder.is_empty() {
+        return None;
+    }
+
+    let output = tokio::time::timeout(
+        BRANCH_TIMEOUT,
+        Command::new("git")
+            .arg("-C")
+            .arg(folder)
+            .arg("rev-parse")
+            .arg("HEAD")
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if hash.is_empty() {
+        None
+    } else {
+        debug!(folder = %folder, hash = %hash, "Got HEAD commit");
+        Some(hash)
+    }
+}
+
 // =============================================================================
 // Mock Implementation for Tests
 // =============================================================================

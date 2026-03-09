@@ -14,10 +14,13 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use super::handlers::{
     create_folder_handler, create_project_handler, create_session_handler, delete_project_handler,
-    delete_session_handler, get_session_handler, health_handler, hook_handler,
+    delete_session_handler, deploy_abort_handler, deploy_rollback_handler, deploy_status_handler,
+    deploy_trigger_handler, get_session_handler, health_handler, hook_handler,
     list_commands_handler, list_folders_handler, list_projects_handler, list_sessions_handler,
-    poll_handler, push_subscribe_handler, push_unsubscribe_handler, rename_project_handler,
-    resize_handler, send_input_handler, update_session_handler, vapid_key_handler,
+    maintainer_inbox_handler, maintainer_pause_handler, maintainer_resume_handler,
+    maintainer_status_handler, poll_handler, push_subscribe_handler, push_unsubscribe_handler,
+    rename_project_handler, resize_handler, send_input_handler, update_session_handler,
+    vapid_key_handler,
 };
 use super::state::AppState;
 use crate::controller::ws::handler::handle_connection;
@@ -51,7 +54,17 @@ pub fn build_router(state: AppState) -> Router {
         .route("/push/subscribe", post(push_subscribe_handler))
         .route("/push/unsubscribe", post(push_unsubscribe_handler))
         // Commands
-        .route("/commands", get(list_commands_handler));
+        .route("/commands", get(list_commands_handler))
+        // Maintainer routes
+        .route("/maintainer/status", get(maintainer_status_handler))
+        .route("/maintainer/inbox", post(maintainer_inbox_handler))
+        .route("/maintainer/pause", post(maintainer_pause_handler))
+        .route("/maintainer/resume", post(maintainer_resume_handler))
+        // Deploy routes
+        .route("/deploy/status", get(deploy_status_handler))
+        .route("/deploy/trigger", post(deploy_trigger_handler))
+        .route("/deploy/abort", post(deploy_abort_handler))
+        .route("/deploy/rollback", post(deploy_rollback_handler));
 
     // Combine with state and middleware — includes WebSocket on same port
     let app = Router::new()

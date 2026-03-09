@@ -44,6 +44,9 @@ pub struct SessionState {
 
     /// Last input sent to the session (for historical context)
     pub last_input: Option<String>,
+
+    /// Whether this is the maintainer session (hidden from main list)
+    pub is_maintainer: bool,
 }
 
 impl Default for SessionState {
@@ -58,6 +61,7 @@ impl Default for SessionState {
             last_working_at: None,
             project_id: None,
             last_input: None,
+            is_maintainer: false,
         }
     }
 }

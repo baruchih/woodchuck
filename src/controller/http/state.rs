@@ -9,6 +9,8 @@ use tracing::warn;
 
 use crate::config::Config;
 use crate::controller::SubscriberMap;
+use crate::controller::deploy::DeployState;
+use crate::controller::ralph::RalphHandle;
 use crate::controller::ws::ServerMessage;
 use crate::model::{OutputChange, SessionStatus, SharedSessionStates};
 use crate::utils::{GitClient, NtfyClient, SessionStore, TmuxClient, WebPushClient};
@@ -39,6 +41,12 @@ pub struct AppState {
 
     /// Session state persistence store
     pub session_store: Arc<dyn SessionStore>,
+
+    /// Ralph loop handle for the maintainer (if running)
+    pub ralph_handle: Arc<tokio::sync::RwLock<Option<Arc<RalphHandle>>>>,
+
+    /// Deploy pipeline state
+    pub deploy: DeployState,
 }
 
 impl AppState {
@@ -53,6 +61,7 @@ impl AppState {
         session_states: SharedSessionStates,
         subscribers: SubscriberMap,
         session_store: Arc<dyn SessionStore>,
+        deploy: DeployState,
     ) -> Self {
         Self {
             config,
@@ -63,6 +72,44 @@ impl AppState {
             session_states,
             subscribers,
             session_store,
+            ralph_handle: Arc::new(tokio::sync::RwLock::new(None)),
+            deploy,
+        }
+    }
+
+    /// Set the ralph loop handle
+    pub async fn set_ralph_handle(&self, handle: RalphHandle) {
+        let mut rh = self.ralph_handle.write().await;
+        *rh = Some(Arc::new(handle));
+    }
+
+    /// Get ralph loop state: (active, paused)
+    pub fn ralph_state(&self) -> (bool, bool) {
+        // Use try_read to avoid blocking in sync context
+        match self.ralph_handle.try_read() {
+            Ok(guard) => match guard.as_ref() {
+                Some(handle) => (true, handle.is_paused()),
+                None => (false, false),
+            },
+            Err(_) => (false, false),
+        }
+    }
+
+    /// Pause the ralph loop
+    pub fn pause_ralph(&self) {
+        if let Ok(guard) = self.ralph_handle.try_read() {
+            if let Some(handle) = guard.as_ref() {
+                handle.pause();
+            }
+        }
+    }
+
+    /// Resume the ralph loop
+    pub fn resume_ralph(&self) {
+        if let Ok(guard) = self.ralph_handle.try_read() {
+            if let Some(handle) = guard.as_ref() {
+                handle.resume();
+            }
         }
     }
 

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WebSocketProvider } from './context/WebSocketContext';
+import { UpdateBanner } from './components/UpdateBanner';
 import { usePushReregister } from './hooks/usePushReregister';
 import { SessionsPage } from './pages/SessionsPage';
 import { SessionPage } from './pages/SessionPage';
@@ -18,6 +19,7 @@ export function App() {
         v7_relativeSplatPath: true,
       }}
     >
+      <UpdateBanner />
       <WebSocketProvider>
         <Routes>
           <Route path="/" element={<SessionsPage />} />

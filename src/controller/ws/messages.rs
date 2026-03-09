@@ -19,7 +19,20 @@ pub enum ClientMessage {
     Unsubscribe { session_id: String },
 
     /// Send input to a session
-    Input { session_id: String, text: String },
+    Input {
+        session_id: String,
+        text: String,
+        /// When true, send text literally without appending Enter (for raw terminal keystroke passthrough)
+        #[serde(default)]
+        raw: bool,
+    },
+
+    /// Resize a session's terminal
+    Resize {
+        session_id: String,
+        cols: u16,
+        rows: u16,
+    },
 }
 
 // =============================================================================
@@ -87,11 +100,30 @@ mod tests {
         let json = r#"{"type": "input", "session_id": "test", "text": "yes"}"#;
         let msg: ClientMessage = serde_json::from_str(json).unwrap();
         match msg {
-            ClientMessage::Input { session_id, text } => {
+            ClientMessage::Input { session_id, text, raw } => {
                 assert_eq!(session_id, "test");
                 assert_eq!(text, "yes");
+                assert!(!raw);
             }
             _ => panic!("Expected Input message"),
+        }
+    }
+
+    #[test]
+    fn test_client_message_deserialize_resize() {
+        let json = r#"{"type": "resize", "session_id": "test", "cols": 120, "rows": 40}"#;
+        let msg: ClientMessage = serde_json::from_str(json).unwrap();
+        match msg {
+            ClientMessage::Resize {
+                session_id,
+                cols,
+                rows,
+            } => {
+                assert_eq!(session_id, "test");
+                assert_eq!(cols, 120);
+                assert_eq!(rows, 40);
+            }
+            _ => panic!("Expected Resize message"),
         }
     }
 

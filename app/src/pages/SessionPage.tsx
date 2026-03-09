@@ -6,12 +6,13 @@ import { RadialMenu } from '../components/RadialMenu';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SlashCommandMenu, useSlashCommandState } from '../components/SlashCommandMenu';
 import { SessionInfoSheet } from '../components/SessionInfoSheet';
+import { XtermTerminal } from '../components/XtermTerminal';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
 import { useCommands } from '../hooks/useCommands';
-import { ansiToHtml } from '../utils/ansi';
+import { useWS } from '../context/WebSocketContext';
 import type { Session, Command } from '../types';
 
 export function SessionPage() {
@@ -19,9 +20,10 @@ export function SessionPage() {
   const navigate = useNavigate();
   const { getSession, deleteSession, sendInput, renameSession, moveToProject } = useSessions();
   const { projects, refresh: refreshProjects } = useProjects();
+  const { resize, sendRawInput } = useWS();
 
   const [session, setSession] = useState<Session | null>(null);
-  const [inputValue, setInputValue] = useState('');
+  const [inputBuffer, setInputBuffer] = useState('');
   const [showKillConfirm, setShowKillConfirm] = useState(false);
   const [showInfoSheet, setShowInfoSheet] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -29,7 +31,6 @@ export function SessionPage() {
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [killing, setKilling] = useState(false);
-  const [showScrollButton, setShowScrollButton] = useState(false);
   const [fabCenter, setFabCenter] = useState({ x: 0, y: 0 });
   const [slashMenuSelectedIndex, setSlashMenuSelectedIndex] = useState(0);
 
@@ -37,10 +38,10 @@ export function SessionPage() {
 
   // Commands for slash autocomplete (session-aware)
   const { commands } = useCommands(decodedId);
-  const { showMenu: showSlashMenu, slashFilter, filteredCommands } = useSlashCommandState(inputValue, commands);
-  const outputRef = useRef<HTMLPreElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const hiddenInputRef = useRef<HTMLInputElement>(null);
+  const { showMenu: showSlashMenu, slashFilter, filteredCommands } = useSlashCommandState(inputBuffer, commands);
+
+  // Ref to track if we're in slash mode (typing a slash command)
+  const slashModeRef = useRef(false);
 
   // Polling hook
   const { content, needsAttention, contextActions, triggerFastPoll, notifySentText } = useTerminal({
@@ -48,126 +49,7 @@ export function SessionPage() {
   });
 
   // Terminal font size (zoom)
-  const { fontSize, zoomIn, zoomOut, setByPinchScale } = useTerminalFontSize();
-  const fontSizeRef = useRef(fontSize);
-  fontSizeRef.current = fontSize;
-
-  // Auto-scroll to bottom on content change, but only if user is near the bottom
-  // This prevents fighting with manual scroll when user is reading earlier output
-  useEffect(() => {
-    const pre = outputRef.current;
-    if (!pre) return;
-
-    // Check if user is near the bottom BEFORE updating content
-    const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight;
-    const distanceFromBottom = scrollableHeight - window.scrollY;
-    const isNearBottom = distanceFromBottom < 150; // Within 150px of bottom
-
-    pre.innerHTML = ansiToHtml(content) || 'Waiting for output...';
-
-    // Only auto-scroll if user was already near the bottom
-    if (isNearBottom) {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
-    }
-  }, [content]);
-
-  // Track window scroll position to show/hide button
-  useEffect(() => {
-    const updateButtonVisibility = () => {
-      const scrollableHeight = document.documentElement.scrollHeight - window.innerHeight;
-      const distanceFromBottom = scrollableHeight - window.scrollY;
-      // Show button if more than 100px from bottom
-      setShowScrollButton(distanceFromBottom > 100);
-    };
-
-    // Check on mount
-    setTimeout(updateButtonVisibility, 100);
-
-    window.addEventListener('scroll', updateButtonVisibility, { passive: true });
-    return () => window.removeEventListener('scroll', updateButtonVisibility);
-  }, []);
-
-  // Auto-scroll when font size changes
-  useEffect(() => {
-    // Scroll to bottom after font size change
-    setTimeout(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' });
-    }, 0);
-  }, [fontSize]);
-
-  // Pinch-to-zoom gesture on the scroll container
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    let pinchStartDist = 0;
-    let pinchBaseFontSize = 0;
-
-    function getTouchDistance(t1: Touch, t2: Touch): number {
-      const dx = t1.clientX - t2.clientX;
-      const dy = t1.clientY - t2.clientY;
-      return Math.sqrt(dx * dx + dy * dy);
-    }
-
-    const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) {
-        const dist = getTouchDistance(e.touches[0], e.touches[1]);
-        if (dist < 1) return; // Fingers too close — avoid division by zero
-        pinchStartDist = dist;
-        pinchBaseFontSize = fontSizeRef.current;
-      }
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 2 && pinchStartDist > 0) {
-        e.preventDefault();
-        const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
-        const scale = currentDist / pinchStartDist;
-        setByPinchScale(scale, pinchBaseFontSize);
-      }
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) {
-        pinchStartDist = 0;
-        pinchBaseFontSize = 0;
-      }
-    };
-
-    container.addEventListener('touchstart', handleTouchStart, { passive: true });
-    container.addEventListener('touchmove', handleTouchMove, { passive: false });
-    container.addEventListener('touchend', handleTouchEnd, { passive: true });
-
-    return () => {
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-    };
-  }, [setByPinchScale]);
-
-  // Global keyboard capture — when no overlay is open, forward
-  // printable keystrokes to the hidden input by focusing it on
-  // any keydown.  This is more robust than relying on the input
-  // keeping focus across menu open/close cycles.
-  useEffect(() => {
-    const handleGlobalKey = (e: KeyboardEvent) => {
-      // Skip if an overlay is open
-      if (menuOpen || showKillConfirm) return;
-      // Skip if focus is already on the hidden input
-      if (document.activeElement === hiddenInputRef.current) return;
-      // Skip modifier-only keys and browser shortcuts
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      // Skip non-printable keys except Enter/Backspace/Delete
-      if (e.key.length > 1 && !['Enter', 'Backspace', 'Delete'].includes(e.key)) return;
-
-      // Focus the hidden input — the browser will then deliver
-      // this same keystroke to the input's own handler.
-      hiddenInputRef.current?.focus();
-    };
-
-    document.addEventListener('keydown', handleGlobalKey, true);
-    return () => document.removeEventListener('keydown', handleGlobalKey, true);
-  }, [menuOpen, showKillConfirm]);
+  const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
 
   // Load session metadata and projects
   useEffect(() => {
@@ -197,25 +79,109 @@ export function SessionPage() {
 
   // ── Input handlers ──
 
-  // Text send — with sending guard to prevent duplicates
-  const handleSendText = useCallback(async () => {
-    if (!decodedId || !inputValue.trim() || sending) return;
+  // Handle raw terminal input from xterm
+  const handleTerminalInput = useCallback(async (data: string) => {
+    if (!decodedId || menuOpen) return;
 
-    const text = inputValue.trim();
-    setSending(true);
-    try {
-      await sendInput(decodedId, text);
-      setInputValue('');
-      triggerFastPoll();
-      notifySentText(text);
-    } catch (err) {
-      console.error('Failed to send input:', err);
-    } finally {
-      setSending(false);
+    // Check if starting a slash command
+    if (data === '/' && inputBuffer === '') {
+      setInputBuffer('/');
+      slashModeRef.current = true;
+      return;
     }
-  }, [decodedId, inputValue, sending, sendInput, triggerFastPoll, notifySentText]);
 
-  // Key send — NO sending guard for rapid fire
+    // If in slash mode, handle input locally
+    if (slashModeRef.current) {
+      // Handle special keys in slash mode
+      if (data === '\r' || data === '\n') {
+        // Enter: send the slash command
+        if (inputBuffer.trim()) {
+          setSending(true);
+          try {
+            await sendInput(decodedId, inputBuffer.trim());
+            triggerFastPoll();
+            notifySentText(inputBuffer.trim());
+          } catch (err) {
+            console.error('Failed to send input:', err);
+          } finally {
+            setSending(false);
+          }
+        }
+        setInputBuffer('');
+        slashModeRef.current = false;
+        return;
+      }
+
+      if (data === '\x7f' || data === '\b') {
+        // Backspace
+        if (inputBuffer.length <= 1) {
+          // If only "/" left, exit slash mode
+          setInputBuffer('');
+          slashModeRef.current = false;
+        } else {
+          setInputBuffer(prev => prev.slice(0, -1));
+        }
+        return;
+      }
+
+      if (data === '\x1b') {
+        // Escape: cancel slash mode
+        setInputBuffer('');
+        slashModeRef.current = false;
+        return;
+      }
+
+      if (data === '\x1b[A') {
+        // Arrow up: navigate slash menu
+        setSlashMenuSelectedIndex((prev) => {
+          const len = filteredCommands.length;
+          if (len === 0) return 0;
+          return (prev - 1 + len) % len;
+        });
+        return;
+      }
+
+      if (data === '\x1b[B') {
+        // Arrow down: navigate slash menu
+        setSlashMenuSelectedIndex((prev) => {
+          const len = filteredCommands.length;
+          if (len === 0) return 0;
+          return (prev + 1) % len;
+        });
+        return;
+      }
+
+      if (data === '\t') {
+        // Tab: select current command
+        const selected = filteredCommands[slashMenuSelectedIndex];
+        if (selected) {
+          setInputBuffer(selected.name + ' ');
+          setSlashMenuSelectedIndex(0);
+        }
+        return;
+      }
+
+      // Regular character: append to buffer
+      if (data.length === 1 && data >= ' ') {
+        setInputBuffer(prev => prev + data);
+        return;
+      }
+
+      return;
+    }
+
+    // Not in slash mode: send raw xterm data directly to tmux (no auto-Enter)
+    sendRawInput(decodedId, data);
+    triggerFastPoll();
+  }, [decodedId, menuOpen, inputBuffer, filteredCommands, slashMenuSelectedIndex, sendInput, sendRawInput, triggerFastPoll, notifySentText]);
+
+  // Handle resize from xterm
+  const handleTerminalResize = useCallback((cols: number, rows: number) => {
+    if (!decodedId) return;
+    resize(decodedId, cols, rows);
+  }, [decodedId, resize]);
+
+  // Key send from radial menu — NO sending guard for rapid fire
   const handleSendKey = useCallback(async (key: string) => {
     if (!decodedId) return;
 
@@ -242,18 +208,11 @@ export function SessionPage() {
     }
   }, [decodedId, killing, deleteSession, navigate]);
 
-  const handleScrollToBottom = useCallback(() => {
-    // The page itself is scrolling (html element), so use window.scrollTo
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
-    setShowScrollButton(false);
-  }, []);
-
   // FAB tap toggles radial menu
   const handleFabTap = useCallback(() => {
     if (menuOpen) {
       setMenuOpen(false);
     } else {
-      hiddenInputRef.current?.blur();
       setMenuOpen(true);
     }
   }, [menuOpen]);
@@ -307,14 +266,6 @@ export function SessionPage() {
     }
   }, [moveToProject]);
 
-  const handleTerminalTap = useCallback(() => {
-    // Don't focus input if user is selecting text
-    if (window.getSelection()?.toString()) return;
-    if (!menuOpen) {
-      hiddenInputRef.current?.focus();
-    }
-  }, [menuOpen]);
-
   // ── Slash command handlers ──
 
   // Reset selection when filter changes
@@ -323,33 +274,23 @@ export function SessionPage() {
   }, [slashFilter]);
 
   const handleSlashCommandSelect = useCallback((command: Command) => {
-    // Replace input with the selected command (name already includes /)
-    setInputValue(command.name + ' ');
+    // Replace buffer with the selected command
+    setInputBuffer(command.name + ' ');
     setSlashMenuSelectedIndex(0);
-    hiddenInputRef.current?.focus();
   }, []);
 
   const handleSlashMenuClose = useCallback(() => {
-    // Clear input when closing menu without selection
-    setInputValue('');
+    // Clear buffer when closing menu without selection
+    setInputBuffer('');
+    slashModeRef.current = false;
     setSlashMenuSelectedIndex(0);
   }, []);
-
-  const handleSlashMenuNavigate = useCallback((delta: number) => {
-    setSlashMenuSelectedIndex((prev) => {
-      const len = filteredCommands.length;
-      if (len === 0) return 0;
-      return (prev + delta + len) % len;
-    });
-  }, [filteredCommands.length]);
 
   // ── Display ──
 
   const title = session?.name || (loading ? 'Loading...' : 'Session');
   const attentionClass = needsAttention ? 'ring-1 ring-status-needs-input' : '';
-  const hasTypedText = !!inputValue.trim();
-
-  // Note: We no longer bail out on error - we show the error inline but keep the UI functional
+  const hasTypedText = inputBuffer.trim().length > 0;
 
   const infoButton = (
     <button
@@ -385,36 +326,16 @@ export function SessionPage() {
         )}
         {/* Terminal output area — fills all available space */}
         <div className={`flex-1 min-h-0 overflow-hidden ${attentionClass}`}>
-          <div
-            ref={scrollContainerRef}
-            className="h-full overflow-y-scroll bg-background"
-            style={{ WebkitOverflowScrolling: 'touch' }}
-            onClick={handleTerminalTap}
-          >
-            <pre
-              ref={outputRef}
-              className="font-mono text-text whitespace-pre-wrap break-words p-3 leading-[1.4]"
-              style={{ fontSize: `${fontSize}px` }}
-            />
-          </div>
+          <XtermTerminal
+            sessionId={decodedId}
+            content={content}
+            fontSize={fontSize}
+            onInput={handleTerminalInput}
+            onResize={handleTerminalResize}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+          />
         </div>
-
-        {/* Scroll-to-bottom button - FIXED position so it stays visible during scroll */}
-        {showScrollButton && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleScrollToBottom();
-            }}
-            className="fixed right-4 bottom-20 z-50 w-12 h-12 rounded-full border-2 border-primary text-primary flex items-center justify-center shadow-lg bg-surface"
-            aria-label="Scroll to bottom"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
-              <path d="M12 5v14M5 12l7 7 7-7" />
-            </svg>
-          </button>
-        )}
 
         {/* Typing preview bar with slash command menu */}
         {(hasTypedText || showSlashMenu) && (
@@ -431,18 +352,35 @@ export function SessionPage() {
             <div className="flex items-start gap-2">
               <span className="text-primary mt-0.5" style={{ fontSize: `${fontSize}px` }}>$</span>
               <span className="text-text font-mono flex-1 break-words whitespace-pre-wrap" style={{ fontSize: `${fontSize}px` }}>
-                {inputValue}
+                {inputBuffer}
               </span>
               <div className="flex items-center gap-1 shrink-0">
                 <button
-                  onClick={handleSendText}
+                  onClick={async () => {
+                    if (!decodedId || !inputBuffer.trim() || sending) return;
+                    setSending(true);
+                    try {
+                      await sendInput(decodedId, inputBuffer.trim());
+                      setInputBuffer('');
+                      slashModeRef.current = false;
+                      triggerFastPoll();
+                      notifySentText(inputBuffer.trim());
+                    } catch (err) {
+                      console.error('Failed to send input:', err);
+                    } finally {
+                      setSending(false);
+                    }
+                  }}
                   disabled={sending}
                   className="text-xs font-medium uppercase tracking-wider text-primary disabled:opacity-30 px-2 py-1 btn-active"
                 >
                   Send
                 </button>
                 <button
-                  onClick={() => setInputValue('')}
+                  onClick={() => {
+                    setInputBuffer('');
+                    slashModeRef.current = false;
+                  }}
                   className="text-xs text-text-muted px-1 btn-active"
                   aria-label="Clear input"
                 >
@@ -452,58 +390,6 @@ export function SessionPage() {
             </div>
           </div>
         )}
-
-        {/* Hidden input for keyboard capture */}
-        <input
-          ref={hiddenInputRef}
-          type="text"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={(e) => {
-            // Handle slash command menu navigation
-            if (showSlashMenu && filteredCommands.length > 0) {
-              if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                handleSlashMenuNavigate(1);
-                return;
-              }
-              if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                handleSlashMenuNavigate(-1);
-                return;
-              }
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                const selected = filteredCommands[slashMenuSelectedIndex];
-                if (selected) {
-                  handleSlashCommandSelect(selected);
-                }
-                return;
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                handleSlashMenuClose();
-                return;
-              }
-            }
-
-            // Normal input handling
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              if (inputValue.trim()) {
-                handleSendText();
-              } else {
-                handleSendKey('Enter');
-              }
-            }
-          }}
-          className="fixed bottom-0 left-0 opacity-0 w-full h-px -z-10"
-          aria-label="Type message to send"
-          autoCapitalize="none"
-          autoCorrect="off"
-          autoComplete="off"
-          enterKeyHint="send"
-        />
       </div>
 
       {/* Floating Action Button */}

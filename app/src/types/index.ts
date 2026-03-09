@@ -74,9 +74,17 @@ export interface InputMessage {
   type: 'input';
   session_id: string;
   text: string;
+  raw?: boolean;
 }
 
-export type ClientMessage = SubscribeMessage | UnsubscribeMessage | InputMessage;
+export interface ResizeMessage {
+  type: 'resize';
+  session_id: string;
+  cols: number;
+  rows: number;
+}
+
+export type ClientMessage = SubscribeMessage | UnsubscribeMessage | InputMessage | ResizeMessage;
 
 // API Response types
 export interface ApiResponse<T> {
@@ -115,6 +123,39 @@ export interface ContextAction {
   label: string;
   key: string;
   variant: 'primary' | 'ghost' | 'danger';
+}
+
+// Maintainer types
+export interface MaintainerStatus {
+  session_id: string;
+  status: string;
+  ralph_active: boolean;
+  ralph_paused: boolean;
+  inbox_count: number;
+  inbox_items: string[];
+  current_task: string | null;
+}
+
+export interface InboxSubmission {
+  source: string;
+  type: 'bug' | 'suggestion' | 'error';
+  message: string;
+}
+
+// Deploy types
+export interface DeployStatus {
+  pending: boolean;
+  last_deploy: string | null;
+  cooldown_remaining_secs: number | null;
+}
+
+export interface DeployTriggerResult {
+  result: string;
+  message: string;
+}
+
+export interface DeployAbortResult {
+  aborted: boolean;
 }
 
 // PWA Install Prompt Event

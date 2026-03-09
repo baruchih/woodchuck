@@ -93,7 +93,9 @@ fn sanitize_error(e: &ModelError) -> String {
         ModelError::IoError(_) => "Internal I/O error".to_string(),
         ModelError::HookInjection(_) => "Hook injection failed".to_string(),
         ModelError::Internal(_) => "Internal server error".to_string(),
-        // User-facing errors are safe to pass through
+        ModelError::GitError(_) => "Git operation failed".to_string(),
+        ModelError::SessionStoreError(_) => "Session store error".to_string(),
+        // User-facing errors are safe to pass through (validation messages, not found, etc.)
         _ => e.to_string(),
     }
 }
@@ -132,6 +134,7 @@ pub fn err_msg(status: StatusCode, message: &str, code: &str) -> (StatusCode, Js
 #[derive(Debug, Serialize)]
 pub struct HealthData {
     pub status: String,
+    pub build_id: String,
 }
 
 /// Sessions list response
@@ -260,6 +263,53 @@ pub struct ProjectRenamedData {
 #[derive(Debug, Serialize)]
 pub struct ProjectDeletedData {
     pub deleted: bool,
+}
+
+// =============================================================================
+// Maintainer Response Data Types
+// =============================================================================
+
+/// Maintainer status response
+#[derive(Debug, Serialize)]
+pub struct MaintainerStatusData {
+    pub session_id: String,
+    pub status: String,
+    pub ralph_active: bool,
+    pub ralph_paused: bool,
+    pub inbox_count: usize,
+    pub inbox_items: Vec<String>,
+    pub current_task: Option<String>,
+}
+
+/// Inbox submission response
+#[derive(Debug, Serialize)]
+pub struct InboxItemData {
+    pub filename: String,
+}
+
+// =============================================================================
+// Deploy Response Data Types
+// =============================================================================
+
+/// Deploy status response
+#[derive(Debug, Serialize)]
+pub struct DeployStatusData {
+    pub pending: bool,
+    pub last_deploy: Option<String>,
+    pub cooldown_remaining_secs: Option<i64>,
+}
+
+/// Deploy trigger response
+#[derive(Debug, Serialize)]
+pub struct DeployTriggerData {
+    pub result: String,
+    pub message: String,
+}
+
+/// Deploy abort response
+#[derive(Debug, Serialize)]
+pub struct DeployAbortData {
+    pub aborted: bool,
 }
 
 // =============================================================================

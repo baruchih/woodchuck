@@ -3654,6 +3654,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "rand 0.8.5",
+ "regex",
  "reqwest",
  "rustls",
  "serde",

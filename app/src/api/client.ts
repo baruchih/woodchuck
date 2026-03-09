@@ -1,4 +1,4 @@
-import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project } from '../types';
+import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult } from '../types';
 
 const BASE_URL = '/api';
 
@@ -123,4 +123,36 @@ export const api = {
     request(`/projects/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
+
+  // Maintainer endpoints
+  getMaintainerStatus: (): Promise<MaintainerStatus> =>
+    request('/maintainer/status'),
+
+  submitInboxItem: (item: InboxSubmission): Promise<{ filename: string }> =>
+    request('/maintainer/inbox', {
+      method: 'POST',
+      body: JSON.stringify(item),
+    }),
+
+  pauseMaintainer: (): Promise<void> =>
+    request('/maintainer/pause', { method: 'POST' }),
+
+  resumeMaintainer: (): Promise<void> =>
+    request('/maintainer/resume', { method: 'POST' }),
+
+  pollMaintainer: (): Promise<PollData> =>
+    request(`/sessions/woodchuck-maintainer/poll`),
+
+  // Deploy endpoints
+  getDeployStatus: (): Promise<DeployStatus> =>
+    request('/deploy/status'),
+
+  triggerDeploy: (): Promise<DeployTriggerResult> =>
+    request('/deploy/trigger', { method: 'POST' }),
+
+  abortDeploy: (): Promise<DeployAbortResult> =>
+    request('/deploy/abort', { method: 'POST' }),
+
+  rollbackDeploy: (): Promise<DeployTriggerResult> =>
+    request('/deploy/rollback', { method: 'POST' }),
 };

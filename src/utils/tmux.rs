@@ -30,6 +30,9 @@ pub trait TmuxClient: Send + Sync {
     /// Send keys to a session
     async fn send_keys(&self, name: &str, keys: &str) -> Result<(), ModelError>;
 
+    /// Send raw terminal data to a session (literal passthrough, no auto-Enter)
+    async fn send_keys_raw(&self, name: &str, data: &str) -> Result<(), ModelError>;
+
     /// Resize a session's window
     async fn resize_window(&self, name: &str, cols: u16, rows: u16) -> Result<(), ModelError>;
 
@@ -209,6 +212,59 @@ impl TmuxClient for Tmux {
                 Err(ModelError::TmuxError(stderr.to_string()))
             }
         }
+    }
+
+    #[instrument(skip(self))]
+    async fn send_keys_raw(&self, name: &str, data: &str) -> Result<(), ModelError> {
+        // Translate xterm escape sequences to tmux key names
+        let key = match data {
+            "\r" | "\n" => "Enter",
+            "\x1b" => "Escape",
+            "\x1b[A" => "Up",
+            "\x1b[B" => "Down",
+            "\x1b[C" => "Right",
+            "\x1b[D" => "Left",
+            "\t" => "Tab",
+            "\x1b[Z" => "BTab",
+            "\x03" => "C-c",
+            "\x04" => "C-d",
+            "\x1a" => "C-z",
+            "\x7f" | "\x08" => "BSpace",
+            "\x1b[3~" => "DC",  // Delete key
+            "\x1b[H" => "Home",
+            "\x1b[F" => "End",
+            "\x1b[5~" => "PageUp",
+            "\x1b[6~" => "PageDown",
+            _ => "",
+        };
+
+        if !key.is_empty() {
+            // Send as tmux key name (no -l flag)
+            let output = Command::new("tmux")
+                .args(["send-keys", "-t", name, key])
+                .output()
+                .await
+                .map_err(|e| ModelError::TmuxError(format!("Failed to run tmux: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(ModelError::TmuxError(stderr.to_string()));
+            }
+        } else if !data.is_empty() {
+            // Send as literal text (with -l flag, no Enter)
+            let output = Command::new("tmux")
+                .args(["send-keys", "-l", "-t", name, data])
+                .output()
+                .await
+                .map_err(|e| ModelError::TmuxError(format!("Failed to run tmux: {}", e)))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(ModelError::TmuxError(stderr.to_string()));
+            }
+        }
+
+        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -395,6 +451,16 @@ pub mod mock {
             let mut sessions = self.sessions.write().await;
             if let Some(session) = sessions.get_mut(name) {
                 session.last_keys.push(keys.to_string());
+                Ok(())
+            } else {
+                Err(ModelError::SessionNotFound(name.to_string()))
+            }
+        }
+
+        async fn send_keys_raw(&self, name: &str, data: &str) -> Result<(), ModelError> {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(name) {
+                session.last_keys.push(format!("raw:{}", data));
                 Ok(())
             } else {
                 Err(ModelError::SessionNotFound(name.to_string()))

@@ -103,11 +103,17 @@ async fn ensure_hook_script(project_folder: &str, external_url: &str) -> Result<
     let claude_dir = PathBuf::from(project_folder).join(".claude");
     let script_path = claude_dir.join("woodchuck-hook.sh");
 
+    // Check for symlink attack: if .claude exists as a symlink, refuse to write
+    if claude_dir.is_symlink() {
+        return Err(ModelError::HookInjection(
+            ".claude directory is a symlink, refusing to write hooks".to_string(),
+        ));
+    }
+
     // Ensure .claude directory exists in the project folder
     fs::create_dir_all(&claude_dir).await.map_err(|e| {
         ModelError::HookInjection(format!(
-            "Failed to create .claude directory in {}: {}",
-            project_folder,
+            "Failed to create .claude directory: {}",
             e
         ))
     })?;
@@ -164,6 +170,9 @@ pub async fn inject_hooks(session_id: &str, project_folder: &str, external_url: 
     let claude_dir = PathBuf::from(project_folder).join(".claude");
     let settings_path = claude_dir.join("settings.json");
     update_settings_json(&settings_path, &script_path).await?;
+
+    // 4. Inject inbox instructions so sessions know how to report issues
+    inject_inbox_instructions(&claude_dir, external_url).await?;
 
     tracing::info!(session = %session_id, project_folder = %project_folder, "Injected Woodchuck hooks");
     Ok(())
@@ -245,6 +254,87 @@ async fn update_settings_json(settings_path: &Path, script_path: &Path) -> Resul
 
     fs::write(settings_path, content).await.map_err(|e| {
         ModelError::HookInjection(format!("Failed to write settings.json: {}", e))
+    })?;
+
+    Ok(())
+}
+
+/// The inbox instructions filename written inside `.claude/`
+const INBOX_INSTRUCTIONS_FILENAME: &str = "woodchuck-inbox.md";
+
+/// Marker line used to detect if inbox instructions are already present in CLAUDE.md
+const INBOX_MARKER: &str = "<!-- woodchuck-inbox -->";
+
+/// Generate inbox instruction content
+fn generate_inbox_instructions(external_url: &str) -> String {
+    format!(
+        r#"{marker}
+## Woodchuck Self-Healing
+
+You are running inside a woodchuck-managed session. If you encounter any of the following:
+- A bug in the woodchuck terminal (display glitches, input issues, resize problems)
+- An error from the woodchuck API or WebSocket
+- An idea to improve the woodchuck experience
+
+You can report it by writing a markdown file to `~/.woodchuck/inbox/`:
+- Filename: `YYYYMMDD-HHMMSS-{{description}}.md`
+- Content: describe the issue clearly with reproduction steps if applicable
+
+Or use the API:
+```bash
+curl -s -X POST {url}/api/maintainer/inbox \
+  -H "Content-Type: application/json" \
+  -d '{{"source":"$CLAUDE_SESSION_ID","type":"bug","message":"description"}}'
+```
+
+The woodchuck maintainer will pick it up and fix it automatically.
+"#,
+        marker = INBOX_MARKER,
+        url = external_url,
+    )
+}
+
+/// Inject inbox instructions into the project's `.claude/` directory.
+///
+/// Appends inbox instructions to `CLAUDE.md` if not already present.
+/// Creates the file if it doesn't exist.
+async fn inject_inbox_instructions(claude_dir: &Path, external_url: &str) -> Result<(), ModelError> {
+    let claude_md_path = claude_dir.join("CLAUDE.md");
+
+    // Refuse to write if CLAUDE.md is a symlink
+    if claude_md_path.is_symlink() {
+        return Err(ModelError::HookInjection(
+            "CLAUDE.md is a symlink, refusing to write".to_string(),
+        ));
+    }
+
+    // Read existing content
+    let existing = match fs::read_to_string(&claude_md_path).await {
+        Ok(content) => content,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(ModelError::HookInjection(format!(
+                "Failed to read CLAUDE.md: {}",
+                e
+            )))
+        }
+    };
+
+    // Skip if already injected
+    if existing.contains(INBOX_MARKER) {
+        return Ok(());
+    }
+
+    // Append inbox instructions
+    let instructions = generate_inbox_instructions(external_url);
+    let new_content = if existing.is_empty() {
+        instructions
+    } else {
+        format!("{}\n\n{}", existing.trim_end(), instructions)
+    };
+
+    fs::write(&claude_md_path, new_content).await.map_err(|e| {
+        ModelError::HookInjection(format!("Failed to write CLAUDE.md: {}", e))
     })?;
 
     Ok(())
@@ -597,5 +687,83 @@ mod tests {
         // Carriage return
         let result = validate_external_url("http://example.com\recho pwned");
         assert!(result.is_err());
+    }
+
+    // Inbox instruction tests
+
+    #[tokio::test]
+    async fn test_inject_inbox_instructions_creates_claude_md() {
+        let temp = TempDir::new().unwrap();
+        let claude_dir = temp.path().join(".claude");
+        fs::create_dir_all(&claude_dir).await.unwrap();
+
+        inject_inbox_instructions(&claude_dir, "http://localhost:3000").await.unwrap();
+
+        let claude_md = claude_dir.join("CLAUDE.md");
+        assert!(claude_md.exists());
+
+        let content = fs::read_to_string(&claude_md).await.unwrap();
+        assert!(content.contains(INBOX_MARKER));
+        assert!(content.contains("woodchuck-managed session"));
+        assert!(content.contains("~/.woodchuck/inbox/"));
+        assert!(content.contains("http://localhost:3000/api/maintainer/inbox"));
+    }
+
+    #[tokio::test]
+    async fn test_inject_inbox_instructions_appends_to_existing() {
+        let temp = TempDir::new().unwrap();
+        let claude_dir = temp.path().join(".claude");
+        fs::create_dir_all(&claude_dir).await.unwrap();
+
+        // Write existing CLAUDE.md
+        let claude_md = claude_dir.join("CLAUDE.md");
+        fs::write(&claude_md, "# My Project\n\nExisting instructions.\n").await.unwrap();
+
+        inject_inbox_instructions(&claude_dir, "http://localhost:3000").await.unwrap();
+
+        let content = fs::read_to_string(&claude_md).await.unwrap();
+        // Existing content preserved
+        assert!(content.contains("# My Project"));
+        assert!(content.contains("Existing instructions."));
+        // Inbox instructions appended
+        assert!(content.contains(INBOX_MARKER));
+    }
+
+    #[tokio::test]
+    async fn test_inject_inbox_instructions_idempotent() {
+        let temp = TempDir::new().unwrap();
+        let claude_dir = temp.path().join(".claude");
+        fs::create_dir_all(&claude_dir).await.unwrap();
+
+        inject_inbox_instructions(&claude_dir, "http://localhost:3000").await.unwrap();
+        let first = fs::read_to_string(claude_dir.join("CLAUDE.md")).await.unwrap();
+
+        inject_inbox_instructions(&claude_dir, "http://localhost:3000").await.unwrap();
+        let second = fs::read_to_string(claude_dir.join("CLAUDE.md")).await.unwrap();
+
+        // Content should be identical (not duplicated)
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn test_generate_inbox_instructions_contains_url() {
+        let content = generate_inbox_instructions("https://my-server.com:8080");
+        assert!(content.contains("https://my-server.com:8080/api/maintainer/inbox"));
+    }
+
+    #[tokio::test]
+    async fn test_inject_hooks_includes_inbox_instructions() {
+        let temp = TempDir::new().unwrap();
+        let project_folder = temp.path().to_string_lossy().to_string();
+
+        inject_hooks("test-session", &project_folder, "http://localhost:3000")
+            .await
+            .unwrap();
+
+        // Verify CLAUDE.md was created with inbox instructions
+        let claude_md = temp.path().join(".claude").join("CLAUDE.md");
+        assert!(claude_md.exists());
+        let content = fs::read_to_string(&claude_md).await.unwrap();
+        assert!(content.contains(INBOX_MARKER));
     }
 }

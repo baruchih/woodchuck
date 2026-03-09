@@ -18,6 +18,7 @@ use super::state::AppState;
 use crate::config::Config;
 use crate::controller::SubscriberMap;
 use crate::model::{ModelError, SharedSessionStates};
+use crate::controller::deploy::DeployState;
 use crate::utils::{GitClient, NtfyClient, SessionStore, TmuxClient, WebPushClient};
 
 /// Stop function type - call to initiate graceful shutdown
@@ -36,6 +37,7 @@ pub async fn start(
     session_states: SharedSessionStates,
     subscribers: SubscriberMap,
     session_store: Arc<dyn SessionStore>,
+    deploy: DeployState,
 ) -> Result<StopFn, ModelError> {
     let addr: SocketAddr = format!("{}:{}", config.bind_addr, config.http_port)
         .parse()
@@ -51,6 +53,7 @@ pub async fn start(
         session_states,
         subscribers,
         session_store,
+        deploy,
     );
 
     // Build router

@@ -6,6 +6,8 @@ interface WebSocketContextValue {
   subscribe: (sessionId: string) => void;
   unsubscribe: (sessionId: string) => void;
   sendInput: (sessionId: string, text: string) => void;
+  sendRawInput: (sessionId: string, data: string) => void;
+  resize: (sessionId: string, cols: number, rows: number) => void;
   onOutput: (callback: (msg: OutputMessage) => void) => () => void;
   onStatus: (callback: (msg: StatusMessage) => void) => () => void;
   onError: (callback: (msg: ErrorMessage) => void) => () => void;
@@ -143,6 +145,14 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     send({ type: 'input', session_id: sessionId, text });
   }, [send]);
 
+  const sendRawInput = useCallback((sessionId: string, data: string) => {
+    send({ type: 'input', session_id: sessionId, text: data, raw: true });
+  }, [send]);
+
+  const resize = useCallback((sessionId: string, cols: number, rows: number) => {
+    send({ type: 'resize', session_id: sessionId, cols, rows });
+  }, [send]);
+
   const onOutput = useCallback((callback: (msg: OutputMessage) => void) => {
     outputListenersRef.current.add(callback);
     return () => {
@@ -169,6 +179,8 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     subscribe,
     unsubscribe,
     sendInput,
+    sendRawInput,
+    resize,
     onOutput,
     onStatus,
     onError,

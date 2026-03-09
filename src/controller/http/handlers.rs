@@ -11,8 +11,9 @@ use serde::Deserialize;
 use tracing::{debug, info, instrument, warn};
 
 use super::response::{
-    err, ApiResponse, CommandsData, FolderCreatedData, FoldersData, HealthData, HookData,
-    InputSentData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
+    err, err_msg, ApiResponse, CommandsData, DeployAbortData, DeployStatusData, DeployTriggerData,
+    FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData, InputSentData,
+    MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData, SessionCreatedData,
     SessionData, SessionKilledData, SessionUpdatedData, SessionsData, VapidKeyData,
 };
@@ -31,6 +32,11 @@ use crate::model::{
 };
 use crate::utils::PushSubscription;
 
+/// Unique ID for this process instance — changes on every restart/re-exec.
+static BUILD_ID: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    uuid::Uuid::new_v4().to_string()
+});
+
 // =============================================================================
 // Health
 // =============================================================================
@@ -41,6 +47,7 @@ pub async fn health_handler() -> Json<ApiResponse<HealthData>> {
     debug!("Health check");
     ApiResponse::ok(HealthData {
         status: "ok".to_string(),
+        build_id: BUILD_ID.clone(),
     })
 }
 
@@ -83,6 +90,9 @@ pub async fn list_sessions_handler(
             }
         }
     }
+
+    // Filter out maintainer session from the public list
+    sessions.retain(|s| s.id != super::super::maintainer::MAINTAINER_SESSION_ID);
 
     info!(count = sessions.len(), "Listed sessions");
     Ok(ApiResponse::ok(SessionsData { sessions }))
@@ -557,6 +567,204 @@ pub async fn rename_project_handler(
 
     info!(project_id = %project_id, new_name = %name, "Renamed project");
     Ok(ApiResponse::ok(ProjectRenamedData { name: name.to_string() }))
+}
+
+// =============================================================================
+// Maintainer
+// =============================================================================
+
+/// Inbox submission parameters
+#[derive(Debug, Deserialize)]
+pub struct InboxParams {
+    pub source: String,
+    #[serde(rename = "type")]
+    pub item_type: String,
+    pub message: String,
+}
+
+/// GET /maintainer/status - Get maintainer session status
+#[instrument(skip(state))]
+pub async fn maintainer_status_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<MaintainerStatusData>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let session_id = super::super::maintainer::MAINTAINER_SESSION_ID;
+    let inbox_path = super::super::maintainer::inbox_dir(&state.config.data_dir);
+
+    // Get session status from shared state
+    let status = {
+        let states = state.session_states.read().await;
+        states.get(session_id).map(|s| s.status.to_string())
+    }.unwrap_or_else(|| "not_running".to_string());
+
+    // Get ralph state from AppState
+    let (ralph_active, ralph_paused) = state.ralph_state();
+
+    // Count inbox items
+    let inbox_items = super::super::maintainer::list_inbox_items(&inbox_path).await;
+    let inbox_count = inbox_items.len();
+
+    // Get current task (from processing dir)
+    let processing_dir = inbox_path.join("processing");
+    let current_task = super::super::maintainer::list_inbox_items(&processing_dir).await.into_iter().next();
+
+    Ok(ApiResponse::ok(MaintainerStatusData {
+        session_id: session_id.to_string(),
+        status,
+        ralph_active,
+        ralph_paused,
+        inbox_count,
+        inbox_items,
+        current_task,
+    }))
+}
+
+/// POST /maintainer/inbox - Submit an item to the maintainer inbox
+#[instrument(skip(state))]
+pub async fn maintainer_inbox_handler(
+    State(state): State<AppState>,
+    Json(params): Json<InboxParams>,
+) -> Result<Json<ApiResponse<InboxItemData>>, (StatusCode, Json<ApiResponse<()>>)> {
+    // Validate input sizes
+    if params.source.len() > 256 {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Source too long (max 256 chars)", "INVALID_INPUT"));
+    }
+    if params.message.len() > 100_000 {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Message too long (max 100K chars)", "INVALID_INPUT"));
+    }
+    if params.item_type.len() > 64 {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Type too long (max 64 chars)", "INVALID_INPUT"));
+    }
+
+    let inbox_path = super::super::maintainer::inbox_dir(&state.config.data_dir);
+
+    let filepath = super::super::maintainer::write_inbox_item(
+        &inbox_path,
+        &params.source,
+        &params.item_type,
+        &params.message,
+    ).await.map_err(|e| {
+        err(crate::model::ModelError::TmuxError(format!("Failed to write inbox item: {}", e)))
+    })?;
+
+    let filename = filepath.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    info!(filename = %filename, "Inbox item submitted via API");
+
+    Ok(ApiResponse::ok(InboxItemData { filename }))
+}
+
+/// POST /maintainer/pause - Pause the ralph loop
+#[instrument(skip(state))]
+pub async fn maintainer_pause_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
+    state.pause_ralph();
+    Ok(ApiResponse::ok(()))
+}
+
+/// POST /maintainer/resume - Resume the ralph loop
+#[instrument(skip(state))]
+pub async fn maintainer_resume_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<()>>, (StatusCode, Json<ApiResponse<()>>)> {
+    state.resume_ralph();
+    Ok(ApiResponse::ok(()))
+}
+
+// =============================================================================
+// Deploy
+// =============================================================================
+
+/// GET /deploy/status - Get deploy pipeline status
+#[instrument(skip(state))]
+pub async fn deploy_status_handler(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<DeployStatusData>> {
+    let status = state.deploy.status();
+    ApiResponse::ok(DeployStatusData {
+        pending: status.pending,
+        last_deploy: status.last_deploy,
+        cooldown_remaining_secs: status.cooldown_remaining_secs,
+    })
+}
+
+/// POST /deploy/trigger - Trigger a deploy (build verification + countdown + swap)
+#[instrument(skip(state))]
+pub async fn deploy_trigger_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<DeployTriggerData>>, (StatusCode, Json<ApiResponse<()>>)> {
+    use super::super::deploy::DeployResult;
+
+    let result = state.deploy.execute(&state.push).await;
+
+    match result {
+        DeployResult::ReExec { .. } => {
+            info!("Deploy successful, scheduling re-exec");
+            // Spawn re-exec after delay to ensure HTTP response is flushed.
+            // exec() replaces the process; the new binary re-binds the port.
+            // Old sockets are closed by the OS when the process image is replaced.
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                super::super::deploy::re_exec();
+            });
+            Ok(ApiResponse::ok(DeployTriggerData {
+                result: "restarting".to_string(),
+                message: "Binary swapped, restarting...".to_string(),
+            }))
+        }
+        DeployResult::Aborted => {
+            Ok(ApiResponse::ok(DeployTriggerData {
+                result: "aborted".to_string(),
+                message: "Deploy was aborted during countdown".to_string(),
+            }))
+        }
+        DeployResult::Failed(msg) => {
+            Err(err_msg(StatusCode::BAD_REQUEST, &msg, "DEPLOY_FAILED"))
+        }
+        DeployResult::RateLimited { next_allowed } => {
+            Err(err_msg(
+                StatusCode::TOO_MANY_REQUESTS,
+                &format!("Deploy rate limited. Next allowed: {}", next_allowed.to_rfc3339()),
+                "DEPLOY_RATE_LIMITED",
+            ))
+        }
+    }
+}
+
+/// POST /deploy/abort - Abort a pending deploy
+#[instrument(skip(state))]
+pub async fn deploy_abort_handler(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<DeployAbortData>> {
+    let was_pending = state.deploy.is_pending();
+    state.deploy.abort();
+    ApiResponse::ok(DeployAbortData {
+        aborted: was_pending,
+    })
+}
+
+/// POST /deploy/rollback - Rollback to previous binary
+#[instrument(skip(state))]
+pub async fn deploy_rollback_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<DeployTriggerData>>, (StatusCode, Json<ApiResponse<()>>)> {
+    match state.deploy.rollback() {
+        Ok(()) => {
+            // Re-exec with rolled-back binary after response flush
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                super::super::deploy::re_exec();
+            });
+            Ok(ApiResponse::ok(DeployTriggerData {
+                result: "rolled_back".to_string(),
+                message: "Rolled back to previous binary, restarting...".to_string(),
+            }))
+        }
+        Err(msg) => Err(err_msg(StatusCode::BAD_REQUEST, &msg, "ROLLBACK_FAILED")),
+    }
 }
 
 /// DELETE /projects/:id - Delete a project (sessions become ungrouped)

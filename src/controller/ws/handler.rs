@@ -16,6 +16,17 @@ use crate::controller::poller::{add_subscriber, remove_subscriber, SubscriberMap
 use crate::model::{detect_status, send_input, SharedSessionStates};
 use crate::utils::TmuxClient;
 
+/// Max length for raw/text input via WebSocket (matches HTTP limit)
+const MAX_WS_INPUT_LEN: usize = 10_000;
+
+/// Validate session ID format (mirrors model::session::validate_session_id)
+fn validate_ws_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && !id.starts_with('-')
+        && id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Handle a WebSocket connection
 pub async fn handle_connection(
     socket: WebSocket,
@@ -75,11 +86,28 @@ pub async fn handle_connection(
                 warn!("Invalid message: {}", e);
                 let _ = tx.send(ServerMessage::Error {
                     session_id: String::new(),
-                    message: format!("Invalid message: {}", e),
+                    message: "Invalid message format".to_string(),
                 });
                 continue;
             }
         };
+
+        // Extract session_id for validation
+        let session_id_ref = match &client_msg {
+            ClientMessage::Subscribe { session_id }
+            | ClientMessage::Unsubscribe { session_id }
+            | ClientMessage::Input { session_id, .. }
+            | ClientMessage::Resize { session_id, .. } => session_id.as_str(),
+        };
+
+        // Validate session_id format on all messages
+        if !validate_ws_session_id(session_id_ref) {
+            let _ = tx.send(ServerMessage::Error {
+                session_id: String::new(),
+                message: "Invalid session ID format".to_string(),
+            });
+            continue;
+        }
 
         // Handle message
         match client_msg {
@@ -98,8 +126,23 @@ pub async fn handle_connection(
                 handle_unsubscribe(&session_id, &subscriptions, &session_states, &subscribers).await;
                 let _ = tx.send(ServerMessage::Unsubscribed { session_id });
             }
-            ClientMessage::Input { session_id, text } => {
-                handle_input(&session_id, &text, &tx, &tmux).await;
+            ClientMessage::Input { session_id, text, raw } => {
+                // Validate input length
+                if text.len() > MAX_WS_INPUT_LEN {
+                    let _ = tx.send(ServerMessage::Error {
+                        session_id: session_id.clone(),
+                        message: "Input too long".to_string(),
+                    });
+                    continue;
+                }
+                handle_input(&session_id, &text, raw, &tx, &tmux).await;
+            }
+            ClientMessage::Resize {
+                session_id,
+                cols,
+                rows,
+            } => {
+                handle_resize(&session_id, cols, rows, &tx, &tmux).await;
             }
         }
     }
@@ -138,9 +181,10 @@ async fn handle_subscribe(
             return;
         }
         Err(e) => {
+            warn!(session = %session_id, error = %e, "tmux error during subscribe");
             let _ = tx.send(ServerMessage::Error {
                 session_id: session_id.to_string(),
-                message: format!("tmux error: {}", e),
+                message: "Internal error checking session".to_string(),
             });
             return;
         }
@@ -203,17 +247,66 @@ async fn handle_unsubscribe(
 async fn handle_input(
     session_id: &str,
     text: &str,
+    raw: bool,
     tx: &mpsc::UnboundedSender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
 ) {
-    match send_input(tmux.as_ref(), session_id, text).await {
+    if raw {
+        // Raw mode: send keys directly without auto-Enter (for xterm keystroke passthrough)
+        match tmux.send_keys_raw(session_id, text).await {
+            Ok(()) => {
+                debug!(session = %session_id, "Raw input sent via WebSocket");
+            }
+            Err(e) => {
+                let _ = tx.send(ServerMessage::Error {
+                    session_id: session_id.to_string(),
+                    message: format!("Failed to send raw input: {}", e),
+                });
+            }
+        }
+    } else {
+        match send_input(tmux.as_ref(), session_id, text).await {
+            Ok(()) => {
+                info!(session = %session_id, "Input sent via WebSocket");
+            }
+            Err(e) => {
+                let _ = tx.send(ServerMessage::Error {
+                    session_id: session_id.to_string(),
+                    message: format!("Failed to send input: {}", e),
+                });
+            }
+        }
+    }
+}
+
+/// Handle resize message
+async fn handle_resize(
+    session_id: &str,
+    cols: u16,
+    rows: u16,
+    tx: &mpsc::UnboundedSender<ServerMessage>,
+    tmux: &Arc<dyn TmuxClient>,
+) {
+    // Validate dimensions
+    if cols == 0 || cols > 500 || rows == 0 || rows > 200 {
+        let _ = tx.send(ServerMessage::Error {
+            session_id: session_id.to_string(),
+            message: format!(
+                "Invalid dimensions: cols={} rows={} (must be 1-500 x 1-200)",
+                cols, rows
+            ),
+        });
+        return;
+    }
+
+    match tmux.resize_window(session_id, cols, rows).await {
         Ok(()) => {
-            info!(session = %session_id, "Input sent via WebSocket");
+            debug!(session = %session_id, cols = %cols, rows = %rows, "Resized via WebSocket");
         }
         Err(e) => {
             let _ = tx.send(ServerMessage::Error {
                 session_id: session_id.to_string(),
-                message: format!("Failed to send input: {}", e),
+                message: format!("Failed to resize: {}", e),
             });
         }
     }
