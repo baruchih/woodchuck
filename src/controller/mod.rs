@@ -67,7 +67,7 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
     let deploy_state = deploy::DeployState::new(&config.data_dir);
 
     // Start HTTP server (now also serves WebSocket on /ws)
-    let http_stop = http::start(
+    let (http_stop, app_state) = http::start(
         config.clone(),
         tmux.clone(),
         git.clone(),
@@ -100,15 +100,42 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
         push.clone(),
     ).await;
 
-    // Return combined stop function
+    // Register ralph handle with app state so API can report status/pause/resume
+    if let Some(handle) = ralph_handle {
+        app_state.set_ralph_handle(handle).await;
+        // Re-acquire for the stop function
+        let app_state_stop = app_state.clone();
+
+        // Return combined stop function
+        let stop_fn: StopFn = Box::new(move || {
+            Box::pin(async move {
+                info!("Stopping controllers...");
+
+                // Stop the ralph loop
+                {
+                    let rh = app_state_stop.ralph_handle.read().await;
+                    if let Some(handle) = rh.as_ref() {
+                        handle.abort();
+                    }
+                }
+
+                // Stop the poller
+                poller_handle.abort();
+
+                // Stop HTTP server
+                http_stop().await;
+
+                info!("All controllers stopped");
+            })
+        });
+
+        return Ok(stop_fn);
+    }
+
+    // Return combined stop function (no ralph)
     let stop_fn: StopFn = Box::new(move || {
         Box::pin(async move {
             info!("Stopping controllers...");
-
-            // Stop the ralph loop
-            if let Some(handle) = ralph_handle {
-                handle.abort();
-            }
 
             // Stop the poller
             poller_handle.abort();

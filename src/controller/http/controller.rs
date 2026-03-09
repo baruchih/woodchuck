@@ -38,7 +38,7 @@ pub async fn start(
     subscribers: SubscriberMap,
     session_store: Arc<dyn SessionStore>,
     deploy: DeployState,
-) -> Result<StopFn, ModelError> {
+) -> Result<(StopFn, AppState), ModelError> {
     let addr: SocketAddr = format!("{}:{}", config.bind_addr, config.http_port)
         .parse()
         .map_err(|e| ModelError::Internal(format!("Invalid address: {}", e)))?;
@@ -57,6 +57,7 @@ pub async fn start(
     );
 
     // Build router
+    let state_clone = state.clone();
     let app = build_router(state);
 
     // Create shutdown channel
@@ -137,5 +138,5 @@ pub async fn start(
         })
     });
 
-    Ok(stop_fn)
+    Ok((stop_fn, state_clone))
 }
