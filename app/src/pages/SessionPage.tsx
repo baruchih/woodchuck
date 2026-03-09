@@ -80,7 +80,6 @@ export function SessionPage() {
   // ── Input handlers ──
 
   // Handle raw terminal input from xterm
-  // All input is buffered and sent on Enter (line mode for mobile-friendly chat)
   const handleTerminalInput = useCallback(async (data: string) => {
     if (!decodedId || menuOpen) return;
 
@@ -91,50 +90,43 @@ export function SessionPage() {
       return;
     }
 
-    // Enter: send the buffered input
-    if (data === '\r' || data === '\n') {
-      if (inputBuffer.trim()) {
-        setSending(true);
-        try {
-          await sendInput(decodedId, inputBuffer.trim());
-          triggerFastPoll();
-          notifySentText(inputBuffer.trim());
-        } catch (err) {
-          console.error('Failed to send input:', err);
-        } finally {
-          setSending(false);
+    // If in slash mode, handle input locally (buffered)
+    if (slashModeRef.current) {
+      if (data === '\r' || data === '\n') {
+        // Enter: send the slash command
+        if (inputBuffer.trim()) {
+          setSending(true);
+          try {
+            await sendInput(decodedId, inputBuffer.trim());
+            triggerFastPoll();
+            notifySentText(inputBuffer.trim());
+          } catch (err) {
+            console.error('Failed to send input:', err);
+          } finally {
+            setSending(false);
+          }
         }
-      } else {
-        // Empty buffer + Enter: send just Enter to tmux (e.g., confirm prompts)
-        sendRawInput(decodedId, data);
-        triggerFastPoll();
-      }
-      setInputBuffer('');
-      slashModeRef.current = false;
-      return;
-    }
-
-    // Backspace
-    if (data === '\x7f' || data === '\b') {
-      if (slashModeRef.current && inputBuffer.length <= 1) {
-        // If only "/" left, exit slash mode
         setInputBuffer('');
         slashModeRef.current = false;
-      } else {
-        setInputBuffer(prev => prev.slice(0, -1));
+        return;
       }
-      return;
-    }
 
-    // Escape: clear buffer
-    if (data === '\x1b') {
-      setInputBuffer('');
-      slashModeRef.current = false;
-      return;
-    }
+      if (data === '\x7f' || data === '\b') {
+        if (inputBuffer.length <= 1) {
+          setInputBuffer('');
+          slashModeRef.current = false;
+        } else {
+          setInputBuffer(prev => prev.slice(0, -1));
+        }
+        return;
+      }
 
-    // Slash mode: arrow keys navigate the menu, tab auto-completes
-    if (slashModeRef.current) {
+      if (data === '\x1b') {
+        setInputBuffer('');
+        slashModeRef.current = false;
+        return;
+      }
+
       if (data === '\x1b[A') {
         setSlashMenuSelectedIndex((prev) => {
           const len = filteredCommands.length;
@@ -143,6 +135,7 @@ export function SessionPage() {
         });
         return;
       }
+
       if (data === '\x1b[B') {
         setSlashMenuSelectedIndex((prev) => {
           const len = filteredCommands.length;
@@ -151,6 +144,7 @@ export function SessionPage() {
         });
         return;
       }
+
       if (data === '\t') {
         const selected = filteredCommands[slashMenuSelectedIndex];
         if (selected) {
@@ -159,20 +153,20 @@ export function SessionPage() {
         }
         return;
       }
-    }
 
-    // Control characters (Ctrl-C, Ctrl-D, etc.) and escape sequences: send directly to tmux
-    if (data.length > 1 || data.charCodeAt(0) < 32) {
-      sendRawInput(decodedId, data);
-      triggerFastPoll();
+      // Regular character: append to slash buffer
+      if (data.length === 1 && data >= ' ') {
+        setInputBuffer(prev => prev + data);
+        return;
+      }
+
       return;
     }
 
-    // Regular character: append to buffer
-    if (data.length === 1 && data >= ' ') {
-      setInputBuffer(prev => prev + data);
-      return;
-    }
+    // Not in slash mode: send raw xterm data directly to tmux
+    // The shell/process in tmux handles echoing, line editing, and buffering
+    sendRawInput(decodedId, data);
+    triggerFastPoll();
   }, [decodedId, menuOpen, inputBuffer, filteredCommands, slashMenuSelectedIndex, sendInput, sendRawInput, triggerFastPoll, notifySentText]);
 
   // Handle resize from xterm
