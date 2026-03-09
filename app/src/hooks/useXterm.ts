@@ -60,6 +60,8 @@ export function useXterm({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const lastContentRef = useRef<string>('');
+  const onInputRef = useRef(onInput);
+  onInputRef.current = onInput;
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
 
   // Initialize terminal
@@ -116,9 +118,9 @@ export function useXterm({
       }
     });
 
-    // Handle keyboard input
+    // Handle keyboard input (use ref to always call latest onInput)
     const inputDisposable = terminal.onData((data) => {
-      onInput(data);
+      onInputRef.current(data);
     });
 
     // Cleanup
