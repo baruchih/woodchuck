@@ -14,8 +14,8 @@ use tracing::{error, info, warn};
 
 use crate::utils::WebPushClient;
 
-/// Minimum time between deploys (1 hour)
-const DEPLOY_COOLDOWN_SECS: i64 = 3600;
+/// Minimum time between deploys (5 minutes)
+const DEPLOY_COOLDOWN_SECS: i64 = 300;
 
 /// Countdown before deploy executes (seconds)
 const DEPLOY_COUNTDOWN_SECS: u64 = 60;
@@ -404,7 +404,7 @@ mod tests {
 
         assert!(status.last_deploy.is_some());
         // Should have cooldown remaining (just deployed)
-        assert!(status.cooldown_remaining_secs.unwrap() > 3500);
+        assert!(status.cooldown_remaining_secs.unwrap() > 250);
     }
 
     #[test]
