@@ -5,6 +5,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const gitHash = execSync('git rev-parse --short HEAD').toString().trim();
 const buildTime = new Date().toISOString();
 
@@ -61,7 +62,8 @@ export default defineConfig({
     },
   },
   define: {
-    __APP_VERSION__: JSON.stringify(gitHash),
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_GIT_HASH__: JSON.stringify(gitHash),
     __BUILD_TIME__: JSON.stringify(buildTime),
   },
   build: {
