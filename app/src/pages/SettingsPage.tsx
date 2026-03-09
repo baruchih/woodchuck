@@ -4,6 +4,7 @@ import { Layout } from '../components/Layout';
 import { Button } from '../components/Button';
 import { useProjects } from '../hooks/useProjects';
 import { api } from '../api/client';
+import { ansiToHtml } from '../utils/ansi';
 import type { Project, MaintainerStatus, DeployStatus } from '../types';
 
 // Storage key for hidden projects
@@ -298,9 +299,8 @@ export function SettingsPage() {
                   <pre
                     ref={outputRef}
                     className="bg-background text-text text-xs p-2 h-64 overflow-auto font-mono whitespace-pre-wrap"
-                  >
-                    {maintainerOutput || 'Loading...'}
-                  </pre>
+                    dangerouslySetInnerHTML={{ __html: maintainerOutput ? ansiToHtml(maintainerOutput) : 'Loading...' }}
+                  />
                 </div>
               )}
 
