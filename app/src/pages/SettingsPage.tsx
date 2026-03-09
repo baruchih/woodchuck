@@ -527,6 +527,15 @@ export function SettingsPage() {
             </>
           )}
         </section>
+
+        {/* Version */}
+        <section className="pt-4 border-t border-border">
+          <p className="text-text-muted text-xs text-center">
+            Woodchuck <span className="font-mono">{__APP_VERSION__}</span>
+            {' · '}
+            Built {new Date(__BUILD_TIME__).toLocaleDateString()}
+          </p>
+        </section>
       </div>
     </Layout>
   );
