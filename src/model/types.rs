@@ -46,6 +46,10 @@ pub struct Session {
     /// Last input sent to the session (for historical context)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_input: Option<String>,
+
+    /// User-assigned tags for filtering/grouping
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 // =============================================================================
@@ -100,6 +104,29 @@ impl fmt::Display for SessionStatus {
 }
 
 // =============================================================================
+// Template
+// =============================================================================
+
+/// A reusable session template (saved folder + prompt preset)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Template {
+    /// Template ID (UUID)
+    pub id: String,
+
+    /// Template name
+    pub name: String,
+
+    /// Project folder path
+    pub folder: String,
+
+    /// Prompt text
+    pub prompt: String,
+
+    /// When the template was created
+    pub created_at: DateTime<Utc>,
+}
+
+// =============================================================================
 // API Parameters
 // =============================================================================
 
@@ -133,6 +160,10 @@ pub struct UpdateSessionParams {
     /// New project ID (Some(id) to set, use "null" in JSON to remove from project)
     #[serde(default, deserialize_with = "deserialize_optional_project_id")]
     pub project_id: Option<Option<String>>,
+
+    /// New tags for the session (replaces existing tags)
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
 }
 
 /// Custom deserializer for project_id to distinguish between missing field and null value
@@ -149,6 +180,19 @@ where
 pub struct CreateProjectParams {
     /// Project name
     pub name: String,
+}
+
+/// Parameters for creating a new template
+#[derive(Debug, Deserialize)]
+pub struct CreateTemplateParams {
+    /// Template name
+    pub name: String,
+
+    /// Project folder path
+    pub folder: String,
+
+    /// Prompt text
+    pub prompt: String,
 }
 
 /// Parameters for renaming a project

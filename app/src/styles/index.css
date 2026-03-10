@@ -8,6 +8,37 @@
   --sar: env(safe-area-inset-right);
   --sab: env(safe-area-inset-bottom);
   --sal: env(safe-area-inset-left);
+
+  /* Theme colors — dark (default) */
+  --color-background: #0a0a0a;
+  --color-surface: #111111;
+  --color-surface-alt: #1a1a1a;
+  --color-border: #222222;
+  --color-text: #e0e0e0;
+  --color-text-muted: #999999;
+  --color-primary: #00ff41;
+  --color-primary-dim: #00cc33;
+  --color-status-resting: #555555;
+  --color-status-working: #00ff41;
+  --color-status-needs-input: #ffaa00;
+  --color-status-error: #ff4444;
+  --color-status-success: #22c55e;
+}
+
+[data-theme="light"] {
+  --color-background: #f5f5f5;
+  --color-surface: #ffffff;
+  --color-surface-alt: #e8e8e8;
+  --color-border: #d0d0d0;
+  --color-text: #1a1a1a;
+  --color-text-muted: #666666;
+  --color-primary: #0d9488;
+  --color-primary-dim: #0b7f74;
+  --color-status-resting: #999999;
+  --color-status-working: #0d9488;
+  --color-status-needs-input: #d97706;
+  --color-status-error: #dc2626;
+  --color-status-success: #16a34a;
 }
 
 /* Prevent body scroll bounce on iOS */
@@ -46,7 +77,7 @@ body {
 /* Send flash animation */
 @keyframes send-flash {
   0% { opacity: 1; }
-  50% { opacity: 0.5; background-color: #00ff41; color: #0a0a0a; }
+  50% { opacity: 0.5; background-color: var(--color-primary); color: var(--color-background); }
   100% { opacity: 1; }
 }
 
@@ -117,7 +148,7 @@ input, textarea, select {
 }
 
 .card-interactive:active {
-  background-color: #1a1a1a;
+  background-color: var(--color-surface-alt);
 }
 
 /* Modal overlay */

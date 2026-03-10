@@ -11,11 +11,20 @@ export interface Session {
   working_since?: string;
   project_id?: string;
   last_input?: string;
+  tags?: string[];
 }
 
 export interface Project {
   id: string;
   name: string;
+  created_at: string;
+}
+
+export interface Template {
+  id: string;
+  name: string;
+  folder: string;
+  prompt: string;
   created_at: string;
 }
 

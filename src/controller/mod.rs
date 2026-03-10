@@ -197,6 +197,7 @@ async fn start_maintainer(
                     last_working_at: Some(chrono::Utc::now()),
                     project_id: None,
                     last_input: None,
+                    tags: Vec::new(),
                 };
                 let store = session_store.clone();
                 let sid = session_id.to_string();

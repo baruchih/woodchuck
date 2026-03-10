@@ -14,14 +14,16 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
 use super::handlers::{
-    create_folder_handler, create_project_handler, create_session_handler, delete_project_handler,
-    delete_session_handler, deploy_abort_handler, deploy_rollback_handler, deploy_status_handler,
-    deploy_trigger_handler, get_session_handler, health_handler, hook_handler,
-    list_commands_handler, list_folders_handler, list_projects_handler, list_sessions_handler,
-    maintainer_inbox_handler, maintainer_pause_handler, maintainer_resume_handler,
-    maintainer_status_handler, poll_handler, push_subscribe_handler, push_unsubscribe_handler,
-    rename_project_handler, resize_handler, send_input_handler, update_session_handler,
-    upload_image_handler, vapid_key_handler,
+    create_folder_handler, create_project_handler, create_session_handler,
+    create_template_handler, delete_project_handler, delete_session_handler,
+    delete_template_handler, deploy_abort_handler, deploy_rollback_handler,
+    deploy_status_handler, deploy_trigger_handler, get_session_handler, health_handler,
+    hook_handler, list_commands_handler, list_folders_handler, list_projects_handler,
+    list_sessions_handler, list_templates_handler, maintainer_inbox_handler,
+    maintainer_pause_handler, maintainer_resume_handler, maintainer_status_handler,
+    poll_handler, push_subscribe_handler, push_unsubscribe_handler, rename_project_handler,
+    resize_handler, send_input_handler, update_session_handler, upload_image_handler,
+    vapid_key_handler,
 };
 use super::rate_limit::{RateLimiter, rate_limit_middleware};
 use super::state::AppState;
@@ -40,6 +42,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/:id/poll", get(poll_handler))
         .route("/folders", get(list_folders_handler))
         .route("/projects", get(list_projects_handler))
+        .route("/templates", get(list_templates_handler))
         .route("/push/vapid-key", get(vapid_key_handler))
         .route("/commands", get(list_commands_handler))
         .route("/maintainer/status", get(maintainer_status_handler))
@@ -58,6 +61,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects", post(create_project_handler))
         .route("/projects/:id", patch(rename_project_handler))
         .route("/projects/:id", delete(delete_project_handler))
+        .route("/templates", post(create_template_handler))
+        .route("/templates/:id", delete(delete_template_handler))
         .route("/push/subscribe", post(push_subscribe_handler))
         .route("/push/unsubscribe", post(push_unsubscribe_handler))
         .route("/maintainer/inbox", post(maintainer_inbox_handler))

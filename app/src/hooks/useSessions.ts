@@ -12,6 +12,7 @@ interface UseSessionsReturn {
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, name: string) => Promise<void>;
   moveToProject: (id: string, projectId: string | null) => Promise<void>;
+  updateTags: (id: string, tags: string[]) => Promise<void>;
   sendInput: (id: string, text: string) => Promise<void>;
   uploadImage: (id: string, file: File) => Promise<string>;
   clearError: () => void;
@@ -66,6 +67,12 @@ export function useSessions(): UseSessionsReturn {
     await refresh();
   }, [refresh]);
 
+  const updateTags = useCallback(async (id: string, tags: string[]): Promise<void> => {
+    await api.updateSession(id, { tags });
+    // Refresh the sessions list after updating tags
+    await refresh();
+  }, [refresh]);
+
   const sendInput = useCallback(async (id: string, text: string): Promise<void> => {
     await api.sendInput(id, text);
   }, []);
@@ -89,6 +96,7 @@ export function useSessions(): UseSessionsReturn {
     deleteSession,
     renameSession,
     moveToProject,
+    updateTags,
     sendInput,
     uploadImage,
     clearError,

@@ -1,15 +1,18 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
 import { Button } from './Button';
 import { StatusBadge } from './StatusBadge';
+import { api } from '../api/client';
 import type { Session, Project } from '../types';
 
 interface SessionInfoSheetProps {
   session: Session | null;
   projects?: Project[];
+  content?: string;
   onClose: () => void;
   onDelete: (sessionId: string) => void;
   onRename?: (sessionId: string, newName: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
+  onUpdateTags?: (sessionId: string, tags: string[]) => void;
 }
 
 function formatDateTime(dateString: string): string {
@@ -45,16 +48,21 @@ function formatDuration(startDateString: string): string {
 export function SessionInfoSheet({
   session,
   projects = [],
+  content,
   onClose,
   onDelete,
   onRename,
   onMoveToProject,
+  onUpdateTags,
 }: SessionInfoSheetProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [newTag, setNewTag] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   // Reset edit state when session changes
   useEffect(() => {
@@ -354,6 +362,69 @@ export function SessionInfoSheet({
             </div>
           )}
 
+          {/* Tags */}
+          {onUpdateTags && (
+            <div>
+              <label className="text-xs text-text-muted uppercase tracking-wider">Tags</label>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {(session.tags ?? []).map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-sm border border-primary/30 bg-primary/10 text-primary"
+                  >
+                    {tag}
+                    <button
+                      onClick={() => {
+                        const updated = (session.tags ?? []).filter((t) => t !== tag);
+                        onUpdateTags(session.id, updated);
+                      }}
+                      className="hover:text-status-error transition-colors ml-0.5"
+                      aria-label={`Remove tag ${tag}`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2 flex gap-1.5">
+                <input
+                  ref={tagInputRef}
+                  type="text"
+                  value={newTag}
+                  onChange={(e) => setNewTag(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const trimmed = newTag.trim();
+                      if (trimmed && !(session.tags ?? []).includes(trimmed)) {
+                        onUpdateTags(session.id, [...(session.tags ?? []), trimmed]);
+                        setNewTag('');
+                      }
+                    }
+                  }}
+                  placeholder="Add tag..."
+                  className="flex-1 bg-background border border-border rounded-sm px-2 py-1 text-text text-xs focus:outline-none focus:border-primary"
+                />
+                <button
+                  onClick={() => {
+                    const trimmed = newTag.trim();
+                    if (trimmed && !(session.tags ?? []).includes(trimmed)) {
+                      onUpdateTags(session.id, [...(session.tags ?? []), trimmed]);
+                      setNewTag('');
+                    }
+                  }}
+                  className="px-2 py-1 text-xs border border-primary/30 rounded-sm text-primary hover:bg-primary/10 transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Status */}
           <div>
             <label className="text-xs text-text-muted uppercase tracking-wider">Status</label>
@@ -380,6 +451,111 @@ export function SessionInfoSheet({
           <div>
             <label className="text-xs text-text-muted uppercase tracking-wider">Last Updated</label>
             <p className="mt-1 text-text text-sm">{formatDateTime(session.updated_at)}</p>
+          </div>
+
+          {/* Export / Copy buttons */}
+          {content && (
+            <div className="pt-4 border-t border-border space-y-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                onClick={() => {
+                  const blob = new Blob([content], { type: 'text/plain' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${session.name || 'session'}.txt`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4 mr-2"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export as .txt
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(content);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  } catch {
+                    console.error('Failed to copy to clipboard');
+                  }
+                }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-4 h-4 mr-2"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                {copied ? 'Copied!' : 'Copy to clipboard'}
+              </Button>
+            </div>
+          )}
+
+          {/* Save as Template button */}
+          <div className="pt-4 border-t border-border">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full"
+              onClick={async () => {
+                const templateName = window.prompt('Template name:', session.name);
+                if (!templateName?.trim()) return;
+                try {
+                  await api.createTemplate({
+                    name: templateName.trim(),
+                    folder: session.folder,
+                    prompt: session.last_input || '',
+                  });
+                } catch (e) {
+                  console.error('Failed to save template:', e);
+                }
+              }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="w-4 h-4 mr-2"
+              >
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <polyline points="17 21 17 13 7 13 7 21" />
+                <polyline points="7 3 7 8 15 8" />
+              </svg>
+              Save as Template
+            </Button>
           </div>
 
           {/* Delete button */}

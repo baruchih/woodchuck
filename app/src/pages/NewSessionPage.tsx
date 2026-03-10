@@ -6,6 +6,7 @@ import { LogoWatermark } from '../components/LogoWatermark';
 import { Button } from '../components/Button';
 import { api } from '../api/client';
 import { getFolderName, truncatePath } from '../utils/path';
+import { useTemplates } from '../hooks/useTemplates';
 
 type Step = 'folder' | 'name';
 
@@ -18,8 +19,16 @@ export function NewSessionPage() {
   const [step, setStep] = useState<Step>(folderFromUrl ? 'name' : 'folder');
   const [selectedFolder, setSelectedFolder] = useState<string | null>(folderFromUrl);
   const [sessionName, setSessionName] = useState(folderFromUrl ? getFolderName(folderFromUrl) : '');
+  const [sessionPrompt, setSessionPrompt] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const { templates, refresh: refreshTemplates } = useTemplates();
+
+  // Load templates on mount
+  useEffect(() => {
+    refreshTemplates();
+  }, [refreshTemplates]);
 
   // Handle folder from URL on mount (in case of direct navigation)
   useEffect(() => {
@@ -42,6 +51,14 @@ export function NewSessionPage() {
     setError(null);
   }, []);
 
+  const handleSelectTemplate = useCallback((template: { name: string; folder: string; prompt: string }) => {
+    setSelectedFolder(template.folder);
+    setSessionName(getFolderName(template.folder));
+    setSessionPrompt(template.prompt);
+    setError(null);
+    setStep('name');
+  }, []);
+
   const handleCreateSession = useCallback(async () => {
     if (!selectedFolder || !sessionName.trim() || creating) return;
 
@@ -52,7 +69,7 @@ export function NewSessionPage() {
       const data = await api.createSession({
         name: sessionName.trim(),
         folder: selectedFolder,
-        prompt: '',
+        prompt: sessionPrompt,
       });
 
       navigate(`/session/${encodeURIComponent(data.session.id)}`);
@@ -61,7 +78,7 @@ export function NewSessionPage() {
       setError(message);
       setCreating(false);
     }
-  }, [selectedFolder, sessionName, creating, navigate]);
+  }, [selectedFolder, sessionName, sessionPrompt, creating, navigate]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && sessionName.trim()) {
@@ -69,7 +86,7 @@ export function NewSessionPage() {
     }
   }, [sessionName, handleCreateSession]);
 
-  // Step 1: Folder selection
+  // Step 1: Folder selection (with optional template section)
   if (step === 'folder') {
     return (
       <Layout title="Select Project" showBack>
@@ -82,6 +99,39 @@ export function NewSessionPage() {
               </div>
             </div>
           )}
+
+          {/* Templates section */}
+          {templates.length > 0 && (
+            <div className="px-4 pt-4">
+              <label className="block text-text text-xs uppercase tracking-wider mb-2">
+                From Template
+              </label>
+              <div className="space-y-2 mb-4">
+                {templates.map((template) => (
+                  <button
+                    key={template.id}
+                    onClick={() => handleSelectTemplate(template)}
+                    className="w-full text-left bg-surface border border-border rounded-sm p-3 hover:border-primary transition-colors"
+                  >
+                    <div className="text-text text-sm font-medium">{template.name}</div>
+                    <div className="text-text-muted text-xs font-mono mt-1 truncate">
+                      {truncatePath(template.folder, 40)}
+                    </div>
+                    {template.prompt && (
+                      <div className="text-text-muted text-xs mt-1 truncate">
+                        {template.prompt}
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <div className="border-t border-border my-4" />
+              <label className="block text-text text-xs uppercase tracking-wider mb-2">
+                Or Choose a Folder
+              </label>
+            </div>
+          )}
+
           <FolderPicker onSelectFolder={handleSelectFolder} />
         </div>
       </Layout>

@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { ShortcutsHelp } from '../components/ShortcutsHelp';
 import { Layout } from '../components/Layout';
 import { PullToRefresh } from '../components/PullToRefresh';
 import { Button } from '../components/Button';
@@ -117,7 +119,7 @@ function loadHiddenProjects(): Set<string> {
 
 export function SessionsPage() {
   const navigate = useNavigate();
-  const { sessions, loading, error, refresh, deleteSession, renameSession, moveToProject } = useSessions();
+  const { sessions, loading, error, refresh, deleteSession, renameSession, moveToProject, updateTags } = useSessions();
   const {
     projects,
     loading: projectsLoading,
@@ -145,6 +147,45 @@ export function SessionsPage() {
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => loadCollapsedProjects());
   const [hiddenProjects, setHiddenProjects] = useState<Set<string>>(() => loadHiddenProjects());
   const [showCreateProject, setShowCreateProject] = useState(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [activeTagFilters, setActiveTagFilters] = useState<Set<string>>(new Set());
+
+  // Collect all unique tags across all sessions
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    for (const s of sessions) {
+      for (const t of s.tags ?? []) {
+        tagSet.add(t);
+      }
+    }
+    return [...tagSet].sort();
+  }, [sessions]);
+
+  // Filter sessions based on search query and active tag filters
+  const filteredSessions = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return sessions.filter((s) => {
+      // Tag filter (AND: session must have ALL active tags)
+      if (activeTagFilters.size > 0) {
+        const sessionTags = new Set(s.tags ?? []);
+        for (const tag of activeTagFilters) {
+          if (!sessionTags.has(tag)) return false;
+        }
+      }
+      // Search query filter
+      if (q) {
+        return (
+          (s.name?.toLowerCase().includes(q)) ||
+          (s.folder?.toLowerCase().includes(q)) ||
+          (s.git_branch?.toLowerCase().includes(q)) ||
+          (s.status?.toLowerCase().includes(q)) ||
+          (s.tags ?? []).some((t) => t.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [sessions, searchQuery, activeTagFilters]);
 
   // Initial load
   useEffect(() => {
@@ -243,15 +284,15 @@ export function SessionsPage() {
 
   // Sort sessions by status priority for grid view
   const sortedSessions = useMemo(() => {
-    if (viewMode !== 'grid') return sessions;
-    return [...sessions].sort((a, b) => {
+    if (viewMode !== 'grid') return filteredSessions;
+    return [...filteredSessions].sort((a, b) => {
       const pa = STATUS_PRIORITY[a.status] ?? 0;
       const pb = STATUS_PRIORITY[b.status] ?? 0;
       if (pa !== pb) return pb - pa;
       // Secondary sort: most recently updated first
       return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
     });
-  }, [viewMode, sessions]);
+  }, [viewMode, filteredSessions]);
 
   // Grid keyboard navigation
   useEffect(() => {
@@ -326,6 +367,19 @@ export function SessionsPage() {
       return next;
     });
   }, []);
+
+  // Keyboard shortcuts
+  const shortcuts = useMemo(() => ({
+    '/': (e: KeyboardEvent) => {
+      e.preventDefault();
+      document.getElementById('search-input')?.focus();
+    },
+    'n': () => navigate('/new'),
+    'g': () => handleToggleViewMode(),
+    '?': () => setShowShortcuts((prev) => !prev),
+  }), [navigate, handleToggleViewMode]);
+
+  useKeyboardShortcuts(shortcuts);
 
   const handleSessionClick = (session: Session) => {
     navigate(`/session/${encodeURIComponent(session.id)}`);
@@ -461,6 +515,14 @@ export function SessionsPage() {
     }
   }, [moveToProject]);
 
+  const handleUpdateTags = useCallback(async (sessionId: string, tags: string[]) => {
+    try {
+      await updateTags(sessionId, tags);
+    } catch {
+      // Error handling
+    }
+  }, [updateTags]);
+
   // Reload hidden projects when returning from settings
   useEffect(() => {
     const handleFocus = () => {
@@ -481,7 +543,7 @@ export function SessionsPage() {
     grouped.set(null, []); // Ungrouped
 
     // Assign sessions to projects
-    for (const session of sessions) {
+    for (const session of filteredSessions) {
       const projectId = session.project_id ?? null;
       const list = grouped.get(projectId);
       if (list) {
@@ -493,7 +555,7 @@ export function SessionsPage() {
     }
 
     return grouped;
-  }, [sessions, projects]);
+  }, [filteredSessions, projects]);
 
   // Filter to only visible projects
   const visibleProjects = useMemo(() => {
@@ -640,6 +702,82 @@ export function SessionsPage() {
           />
 
           <div className="p-4">
+            {/* Search input */}
+            {(sessions.length > 0 || projects.length > 0) && (
+              <div className="relative mb-4">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  id="search-input"
+                  type="text"
+                  placeholder="Search sessions..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-10 pr-8 py-2 text-sm bg-background border border-border rounded-sm text-text placeholder:text-text-muted focus:outline-none focus:border-primary"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text p-1"
+                    aria-label="Clear search"
+                  >
+                    <span className="text-sm leading-none">&times;</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Tag filter chips */}
+            {allTags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {allTags.map((tag) => {
+                  const isActive = activeTagFilters.has(tag);
+                  return (
+                    <button
+                      key={tag}
+                      onClick={() => {
+                        setActiveTagFilters((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(tag)) {
+                            next.delete(tag);
+                          } else {
+                            next.add(tag);
+                          }
+                          return next;
+                        });
+                      }}
+                      className={`px-2 py-0.5 text-xs rounded-sm border transition-colors ${
+                        isActive
+                          ? 'border-primary bg-primary/20 text-primary'
+                          : 'border-primary/30 bg-primary/5 text-text-muted hover:text-primary hover:border-primary/50'
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+                {activeTagFilters.size > 0 && (
+                  <button
+                    onClick={() => setActiveTagFilters(new Set())}
+                    className="px-2 py-0.5 text-xs rounded-sm text-text-muted hover:text-text transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* Error state */}
             {error && (
               <div className="bg-status-error/10 border border-status-error rounded-sm p-4 mb-4">
@@ -679,6 +817,7 @@ export function SessionsPage() {
                 {/* Visible project sections */}
                 {visibleProjects.map((project) => {
                   const projectSessions = sessionsByProject.get(project.id) ?? [];
+                  if (searchQuery && projectSessions.length === 0) return null;
                   return (
                     <ProjectSection
                       key={project.id}
@@ -700,8 +839,8 @@ export function SessionsPage() {
                 {/* Ungrouped section (always at bottom of visible projects) */}
                 {(() => {
                   const ungroupedSessions = sessionsByProject.get(null) ?? [];
-                  // Only show if there are ungrouped sessions or no visible projects
-                  if (ungroupedSessions.length === 0 && visibleProjects.length > 0) {
+                  // Only show if there are ungrouped sessions or no visible projects (hide when searching with no matches)
+                  if (ungroupedSessions.length === 0 && (visibleProjects.length > 0 || searchQuery)) {
                     return null;
                   }
                   return (
@@ -723,7 +862,7 @@ export function SessionsPage() {
             )}
 
             {/* Grid view */}
-            {sessions.length > 0 && viewMode === 'grid' && (
+            {filteredSessions.length > 0 && viewMode === 'grid' && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                 {sortedSessions.map((session, index) => (
                   <div key={session.id} className="h-[220px]">
@@ -773,12 +912,24 @@ export function SessionsPage() {
         onDelete={handleDeleteFromSheet}
         onRename={handleRename}
         onMoveToProject={handleMoveToProject}
+        onUpdateTags={handleUpdateTags}
       />
 
       <CreateProjectDialog
         open={showCreateProject}
         onConfirm={handleCreateProject}
         onCancel={() => setShowCreateProject(false)}
+      />
+
+      <ShortcutsHelp
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+        shortcuts={[
+          { key: '/', description: 'Focus search bar' },
+          { key: 'n', description: 'New session' },
+          { key: 'g', description: 'Toggle grid/list view' },
+          { key: '?', description: 'Show/hide this help' },
+        ]}
       />
 
       <ConfirmDialog

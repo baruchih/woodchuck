@@ -1,4 +1,4 @@
-import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult } from '../types';
+import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult } from '../types';
 
 const BASE_URL = '/api';
 
@@ -37,7 +37,7 @@ export const api = {
       method: 'DELETE'
     }),
 
-  updateSession: (id: string, params: { name?: string; project_id?: string | null }): Promise<{ name?: string; project_id?: string }> =>
+  updateSession: (id: string, params: { name?: string; project_id?: string | null; tags?: string[] }): Promise<{ name?: string; project_id?: string; tags?: string[] }> =>
     request(`/sessions/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(params),
@@ -171,4 +171,19 @@ export const api = {
     }
     return data.data;
   },
+
+  // Template endpoints
+  getTemplates: (): Promise<{ templates: Template[] }> =>
+    request('/templates'),
+
+  createTemplate: (params: { name: string; folder: string; prompt: string }): Promise<{ template: Template }> =>
+    request('/templates', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+  deleteTemplate: (id: string): Promise<{ deleted: boolean }> =>
+    request(`/templates/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 };

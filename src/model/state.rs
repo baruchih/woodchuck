@@ -45,6 +45,9 @@ pub struct SessionState {
     /// Last input sent to the session (for historical context)
     pub last_input: Option<String>,
 
+    /// User-assigned tags for filtering/grouping
+    pub tags: Vec<String>,
+
     /// Whether this is the maintainer session (hidden from main list)
     pub is_maintainer: bool,
 
@@ -64,6 +67,7 @@ impl Default for SessionState {
             last_working_at: None,
             project_id: None,
             last_input: None,
+            tags: Vec::new(),
             is_maintainer: false,
             last_notified_status: None,
         }
@@ -93,6 +97,7 @@ impl SessionState {
             last_working_at: persisted.last_working_at,
             project_id: persisted.project_id,
             last_input: persisted.last_input,
+            tags: persisted.tags,
             ..Self::default()
         }
     }
@@ -106,6 +111,7 @@ impl SessionState {
             last_working_at: self.last_working_at,
             project_id: self.project_id.clone(),
             last_input: self.last_input.clone(),
+            tags: self.tags.clone(),
         }
     }
 

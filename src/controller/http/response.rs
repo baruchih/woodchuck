@@ -163,13 +163,15 @@ pub struct SessionKilledData {
     pub killed: bool,
 }
 
-/// Session updated response (renamed or moved to project)
+/// Session updated response (renamed, moved to project, or tags updated)
 #[derive(Debug, Serialize)]
 pub struct SessionUpdatedData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Input sent response
@@ -262,6 +264,28 @@ pub struct ProjectRenamedData {
 /// Project deleted response
 #[derive(Debug, Serialize)]
 pub struct ProjectDeletedData {
+    pub deleted: bool,
+}
+
+// =============================================================================
+// Template Response Data Types
+// =============================================================================
+
+/// Single template response
+#[derive(Debug, Serialize)]
+pub struct TemplateData {
+    pub template: crate::model::types::Template,
+}
+
+/// Templates list response
+#[derive(Debug, Serialize)]
+pub struct TemplatesListData {
+    pub templates: Vec<crate::model::types::Template>,
+}
+
+/// Template deleted response
+#[derive(Debug, Serialize)]
+pub struct TemplateDeletedData {
     pub deleted: bool,
 }
 

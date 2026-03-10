@@ -19,5 +19,5 @@ pub use git::{detect_git_branch, Git, GitClient};
 pub use hooks::inject_hooks;
 pub use notify::{NoopNtfy, Ntfy, NtfyClient};
 pub use push::{NoopWebPush, PushSubscription, PushSubscriptionKeys, WebPush, WebPushClient};
-pub use session_store::{JsonSessionStore, NoopSessionStore, PersistedProject, PersistedSessionState, SessionStore};
+pub use session_store::{JsonSessionStore, NoopSessionStore, PersistedProject, PersistedSessionState, PersistedTemplate, SessionStore};
 pub use tmux::{Tmux, TmuxClient};

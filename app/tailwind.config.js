@@ -4,20 +4,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#0a0a0a',
-        surface: '#111111',
-        'surface-alt': '#1a1a1a',
-        primary: '#00ff41',
-        'primary-dim': '#00cc33',
-        text: '#e0e0e0',
-        'text-muted': '#999999',
-        border: '#222222',
+        background: 'var(--color-background)',
+        surface: 'var(--color-surface)',
+        'surface-alt': 'var(--color-surface-alt)',
+        primary: 'var(--color-primary)',
+        'primary-dim': 'var(--color-primary-dim)',
+        text: 'var(--color-text)',
+        'text-muted': 'var(--color-text-muted)',
+        border: 'var(--color-border)',
         status: {
-          resting: '#555555',
-          working: '#00ff41',
-          'needs-input': '#ffaa00',
-          error: '#ff4444',
-          success: '#22c55e',
+          resting: 'var(--color-status-resting)',
+          working: 'var(--color-status-working)',
+          'needs-input': 'var(--color-status-needs-input)',
+          error: 'var(--color-status-error)',
+          success: 'var(--color-status-success)',
         },
       },
       fontFamily: {

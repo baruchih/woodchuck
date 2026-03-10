@@ -15,8 +15,8 @@ use super::response::{
     FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData, InputSentData,
     MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData, SessionCreatedData,
-    SessionData, SessionKilledData, SessionUpdatedData, SessionsData, UploadedImageData,
-    VapidKeyData,
+    SessionData, SessionKilledData, SessionUpdatedData, SessionsData, TemplateData,
+    TemplateDeletedData, TemplatesListData, UploadedImageData, VapidKeyData,
 };
 use super::state::AppState;
 
@@ -29,7 +29,7 @@ use crate::model::{
     list_commands_with_skills, list_folders, list_sessions, poll_output, process_hook_event,
     resize_session, send_input, validate_hook_session, validate_rename, CreateFolderParams,
     CreateSessionParams, CreateProjectParams, HookEventParams, RenameProjectParams, ResizeParams,
-    SendInputParams, UpdateSessionParams, Project,
+    SendInputParams, UpdateSessionParams, Project, CreateTemplateParams,
 };
 use crate::utils::PushSubscription;
 
@@ -82,6 +82,7 @@ pub async fn list_sessions_handler(
             session.working_since = ss.working_since;
             session.project_id = ss.project_id.clone();
             session.last_input = ss.last_input.clone();
+            session.tags = ss.tags.clone();
             // Only overlay name if we have a user-provided name stored
             if !ss.name.is_empty() {
                 debug!(session_id = %session.id, stored_name = %ss.name, "Overlaying stored name");
@@ -119,6 +120,7 @@ pub async fn get_session_handler(
         session.working_since = ss.working_since;
         session.project_id = ss.project_id.clone();
         session.last_input = ss.last_input.clone();
+        session.tags = ss.tags.clone();
         if !ss.name.is_empty() {
             session.name = ss.name.clone();
         }
@@ -319,7 +321,7 @@ pub async fn update_session_handler(
     }
 
     // Update shared state and get the full state for persistence
-    let (final_name, final_project_id) = {
+    let (final_name, final_project_id, final_tags) = {
         let mut states = state.session_states.write().await;
         let ss = states.entry(session_id.clone()).or_insert_with(|| {
             crate::model::SessionState::default()
@@ -335,22 +337,29 @@ pub async fn update_session_handler(
             ss.project_id = new_project_id;
         }
 
+        // Update tags if provided
+        if let Some(new_tags) = params.tags.clone() {
+            ss.tags = new_tags;
+        }
+
         let persisted = ss.to_persisted();
         let name = if ss.name.is_empty() { None } else { Some(ss.name.clone()) };
         let project_id = ss.project_id.clone();
+        let tags = ss.tags.clone();
 
         // Persist full state (non-fatal if fails)
         if let Err(e) = state.session_store.save(&session_id, &persisted).await {
             warn!(session = %session_id, error = %e, "Failed to persist updated session");
         }
 
-        (name, project_id)
+        (name, project_id, tags)
     };
 
     info!(session = %session_id, name = ?final_name, project_id = ?final_project_id, "Updated session");
     Ok(ApiResponse::ok(SessionUpdatedData {
         name: final_name,
         project_id: final_project_id,
+        tags: final_tags,
     }))
 }
 
@@ -568,6 +577,82 @@ pub async fn rename_project_handler(
 
     info!(project_id = %project_id, new_name = %name, "Renamed project");
     Ok(ApiResponse::ok(ProjectRenamedData { name: name.to_string() }))
+}
+
+// =============================================================================
+// Templates
+// =============================================================================
+
+/// GET /templates - List all templates
+#[instrument(skip(state))]
+pub async fn list_templates_handler(
+    State(state): State<AppState>,
+) -> ApiResult<TemplatesListData> {
+    let templates = state.session_store.load_templates().await.map_err(err)?;
+
+    info!(count = templates.len(), "Listed templates");
+    Ok(ApiResponse::ok(TemplatesListData { templates }))
+}
+
+/// POST /templates - Create a new template
+#[instrument(skip(state))]
+pub async fn create_template_handler(
+    State(state): State<AppState>,
+    Json(params): Json<CreateTemplateParams>,
+) -> ApiResultCreated<TemplateData> {
+    let name = params.name.trim();
+    if name.is_empty() {
+        return Err(err(crate::model::ModelError::ValidationError(
+            "Template name cannot be empty".to_string(),
+        )));
+    }
+
+    let template_id = format!("tmpl-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or(""));
+    let now = chrono::Utc::now();
+
+    let persisted = crate::utils::PersistedTemplate {
+        name: name.to_string(),
+        folder: params.folder,
+        prompt: params.prompt,
+        created_at: now,
+    };
+
+    state
+        .session_store
+        .save_template(&template_id, &persisted)
+        .await
+        .map_err(err)?;
+
+    let template = crate::model::Template {
+        id: template_id.clone(),
+        name: name.to_string(),
+        folder: persisted.folder,
+        prompt: persisted.prompt,
+        created_at: now,
+    };
+
+    info!(template_id = %template_id, name = %name, "Created template");
+    Ok((StatusCode::CREATED, ApiResponse::ok(TemplateData { template })))
+}
+
+/// DELETE /templates/:id - Delete a template
+#[instrument(skip(state))]
+pub async fn delete_template_handler(
+    State(state): State<AppState>,
+    Path(template_id): Path<String>,
+) -> ApiResult<TemplateDeletedData> {
+    // Check template exists
+    let templates = state.session_store.load_templates().await.map_err(err)?;
+    if !templates.iter().any(|t| t.id == template_id) {
+        return Err(err(crate::model::ModelError::ValidationError(
+            format!("Template not found: {}", template_id),
+        )));
+    }
+
+    state.session_store.remove_template(&template_id).await.map_err(err)?;
+
+    info!(template_id = %template_id, "Deleted template");
+    Ok(ApiResponse::ok(TemplateDeletedData { deleted: true }))
 }
 
 // =============================================================================

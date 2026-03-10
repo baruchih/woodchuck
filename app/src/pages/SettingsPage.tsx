@@ -3,8 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Button } from '../components/Button';
 import { useProjects } from '../hooks/useProjects';
+import { useTemplates } from '../hooks/useTemplates';
 import { api } from '../api/client';
 import { ansiToHtml } from '../utils/ansi';
+import { useTheme } from '../context/ThemeContext';
+import { truncatePath } from '../utils/path';
 import type { Project, MaintainerStatus, DeployStatus } from '../types';
 
 // Storage key for hidden projects
@@ -43,7 +46,9 @@ function statusColor(status: string): string {
 
 export function SettingsPage() {
   const navigate = useNavigate();
+  const { theme, setTheme } = useTheme();
   const { projects, refresh: refreshProjects } = useProjects();
+  const { templates, refresh: refreshTemplates, deleteTemplate } = useTemplates();
   const [hiddenProjects, setHiddenProjects] = useState<Set<string>>(() => loadHiddenProjects());
 
   // Maintainer state
@@ -61,9 +66,10 @@ export function SettingsPage() {
   // Initial load
   useEffect(() => {
     refreshProjects();
+    refreshTemplates();
     refreshMaintainerStatus();
     refreshDeployStatus();
-  }, [refreshProjects]);
+  }, [refreshProjects, refreshTemplates]);
 
   // Poll maintainer + deploy status every 5s
   useEffect(() => {
@@ -205,6 +211,14 @@ export function SettingsPage() {
     }
   };
 
+  const handleDeleteTemplate = async (id: string) => {
+    try {
+      await deleteTemplate(id);
+    } catch (e) {
+      console.error('Failed to delete template:', e);
+    }
+  };
+
   // Split projects into visible and hidden
   const visibleProjects: Project[] = [];
   const hiddenProjectsList: Project[] = [];
@@ -219,6 +233,35 @@ export function SettingsPage() {
   return (
     <Layout title="Settings" showBack>
       <div className="p-4 space-y-8">
+        {/* Theme Section */}
+        <section>
+          <h2 className="text-sm font-medium text-text uppercase tracking-wider mb-4">
+            Theme
+          </h2>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setTheme('dark')}
+              className={`px-4 py-2 rounded-sm text-sm font-medium transition-colors border ${
+                theme === 'dark'
+                  ? 'bg-primary text-background border-primary'
+                  : 'bg-surface text-text-muted border-border hover:text-text'
+              }`}
+            >
+              Dark
+            </button>
+            <button
+              onClick={() => setTheme('light')}
+              className={`px-4 py-2 rounded-sm text-sm font-medium transition-colors border ${
+                theme === 'light'
+                  ? 'bg-primary text-background border-primary'
+                  : 'bg-surface text-text-muted border-border hover:text-text'
+              }`}
+            >
+              Light
+            </button>
+          </div>
+        </section>
+
         {/* Maintainer Section */}
         <section>
           <h2 className="text-sm font-medium text-text uppercase tracking-wider mb-4">
@@ -412,6 +455,43 @@ export function SettingsPage() {
             </div>
           ) : (
             <p className="text-text-muted text-sm italic">Deploy status unavailable</p>
+          )}
+        </section>
+
+        {/* Templates Section */}
+        <section>
+          <h2 className="text-sm font-medium text-text uppercase tracking-wider mb-4">
+            Templates
+          </h2>
+          <p className="text-text-muted text-sm mb-4">
+            Saved session presets. Create templates from the session info sheet.
+          </p>
+
+          {templates.length === 0 ? (
+            <p className="text-text-muted text-sm italic">No templates yet</p>
+          ) : (
+            <div className="space-y-2">
+              {templates.map((template) => (
+                <div
+                  key={template.id}
+                  className="flex items-center justify-between px-3 py-3 bg-surface border border-border rounded-sm"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-text font-medium">{template.name}</div>
+                    <div className="text-xs text-text-muted font-mono truncate mt-0.5">
+                      {truncatePath(template.folder, 40)}
+                    </div>
+                  </div>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => handleDeleteTemplate(template.id)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              ))}
+            </div>
           )}
         </section>
 

@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import { ShortcutsHelp } from '../components/ShortcutsHelp';
 import { Layout } from '../components/Layout';
 import { FloatingActionButton } from '../components/FloatingActionButton';
 import { RadialMenu } from '../components/RadialMenu';
@@ -316,6 +318,16 @@ export function SessionPage() {
     }
   }, [moveToProject]);
 
+  // ── Keyboard shortcuts ──
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  const globalShortcuts = useMemo(() => ({
+    'Escape': () => navigate('/'),
+    '?': () => setShowShortcuts((prev) => !prev),
+  }), [navigate]);
+
+  useKeyboardShortcuts(globalShortcuts);
+
   // ── Slash command handlers ──
 
   // Reset selection when filter changes
@@ -499,12 +511,22 @@ export function SessionPage() {
         <SessionInfoSheet
           session={session}
           projects={projects}
+          content={content}
           onClose={handleCloseInfo}
           onDelete={handleDeleteFromInfo}
           onRename={handleRenameSession}
           onMoveToProject={handleMoveToProject}
         />
       )}
+
+      <ShortcutsHelp
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+        shortcuts={[
+          { key: 'Escape', description: 'Back to sessions list' },
+          { key: '?', description: 'Show/hide this help' },
+        ]}
+      />
 
       {/* Hidden file input for image upload */}
       <input

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WebSocketProvider } from './context/WebSocketContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { UpdateBanner } from './components/UpdateBanner';
 import { usePushReregister } from './hooks/usePushReregister';
 import { SessionsPage } from './pages/SessionsPage';
@@ -13,22 +14,24 @@ export function App() {
   usePushReregister();
 
   return (
-    <BrowserRouter
-      future={{
-        v7_startTransition: true,
-        v7_relativeSplatPath: true,
-      }}
-    >
-      <UpdateBanner />
-      <WebSocketProvider>
-        <Routes>
-          <Route path="/" element={<SessionsPage />} />
-          <Route path="/session/:id" element={<SessionPage />} />
-          <Route path="/new" element={<NewSessionPage />} />
-          <Route path="/insult-sword-fight" element={<InsultSwordFightPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-        </Routes>
-      </WebSocketProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <UpdateBanner />
+        <WebSocketProvider>
+          <Routes>
+            <Route path="/" element={<SessionsPage />} />
+            <Route path="/session/:id" element={<SessionPage />} />
+            <Route path="/new" element={<NewSessionPage />} />
+            <Route path="/insult-sword-fight" element={<InsultSwordFightPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </Routes>
+        </WebSocketProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }

@@ -31,4 +31,4 @@ pub use session::{
 pub use state::{new_shared_states, OutputChange, SessionState, SharedSessionStates};
 pub use commands::{discover_skills, list_commands, list_commands_with_skills};
 pub use folder::{create_folder, list_folders};
-pub use types::{CreateFolderParams, CreateSessionParams, CreateProjectParams, HookEventParams, Project, RenameProjectParams, ResizeParams, SendInputParams, Session, SessionStatus, SlashCommand, TmuxSessionInfo, UpdateSessionParams};
+pub use types::{CreateFolderParams, CreateSessionParams, CreateProjectParams, CreateTemplateParams, HookEventParams, Project, RenameProjectParams, ResizeParams, SendInputParams, Session, SessionStatus, SlashCommand, Template, TmuxSessionInfo, UpdateSessionParams};

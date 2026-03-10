@@ -58,6 +58,10 @@ pub struct PersistedSessionState {
     /// Last input sent to the session (for historical context)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_input: Option<String>,
+
+    /// User-assigned tags for filtering/grouping
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
 }
 
 /// Persisted project state (stored to disk)
@@ -67,6 +71,22 @@ pub struct PersistedProject {
     pub name: String,
 
     /// When the project was created
+    pub created_at: DateTime<Utc>,
+}
+
+/// Persisted template state (stored to disk)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedTemplate {
+    /// Template name
+    pub name: String,
+
+    /// Project folder path
+    pub folder: String,
+
+    /// Prompt text
+    pub prompt: String,
+
+    /// When the template was created
     pub created_at: DateTime<Utc>,
 }
 
@@ -107,6 +127,15 @@ pub trait SessionStore: Send + Sync {
 
     /// Remove a project (sessions with this project_id will become ungrouped)
     async fn remove_project(&self, project_id: &str) -> Result<(), ModelError>;
+
+    /// Load all templates from storage
+    async fn load_templates(&self) -> Result<Vec<crate::model::types::Template>, ModelError>;
+
+    /// Save a template
+    async fn save_template(&self, template_id: &str, template: &PersistedTemplate) -> Result<(), ModelError>;
+
+    /// Remove a template
+    async fn remove_template(&self, template_id: &str) -> Result<(), ModelError>;
 }
 
 // =============================================================================
@@ -127,13 +156,15 @@ struct SessionStoreV2 {
     sessions: HashMap<String, PersistedSessionState>,
 }
 
-/// File format version 3 (with projects)
+/// File format version 3 (with projects and templates)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionStoreV3 {
     version: u8,
     sessions: HashMap<String, PersistedSessionState>,
     #[serde(default)]
     projects: HashMap<String, PersistedProject>,
+    #[serde(default)]
+    templates: HashMap<String, PersistedTemplate>,
 }
 
 impl Default for SessionStoreV3 {
@@ -142,6 +173,7 @@ impl Default for SessionStoreV3 {
             version: 3,
             sessions: HashMap::new(),
             projects: HashMap::new(),
+            templates: HashMap::new(),
         }
     }
 }
@@ -254,6 +286,7 @@ impl JsonSessionStore {
                                 version: 3,
                                 sessions: v2_store.sessions,
                                 projects: HashMap::new(),
+                                templates: HashMap::new(),
                             },
                             true, // needs write to save migration
                         )
@@ -287,6 +320,7 @@ impl JsonSessionStore {
                                 version: 3,
                                 sessions: v3_sessions,
                                 projects: HashMap::new(),
+                                templates: HashMap::new(),
                             },
                             true, // needs write to save migration
                         )
@@ -416,6 +450,40 @@ impl SessionStore for JsonSessionStore {
         }
         self.write_to_file().await
     }
+
+    async fn load_templates(&self) -> Result<Vec<crate::model::types::Template>, ModelError> {
+        let data = self.data.read().await;
+        let mut templates: Vec<crate::model::types::Template> = data
+            .templates
+            .iter()
+            .map(|(id, t)| crate::model::types::Template {
+                id: id.clone(),
+                name: t.name.clone(),
+                folder: t.folder.clone(),
+                prompt: t.prompt.clone(),
+                created_at: t.created_at,
+            })
+            .collect();
+        // Sort by created_at descending (newest first)
+        templates.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(templates)
+    }
+
+    async fn save_template(&self, template_id: &str, template: &PersistedTemplate) -> Result<(), ModelError> {
+        {
+            let mut data = self.data.write().await;
+            data.templates.insert(template_id.to_string(), template.clone());
+        }
+        self.write_to_file().await
+    }
+
+    async fn remove_template(&self, template_id: &str) -> Result<(), ModelError> {
+        {
+            let mut data = self.data.write().await;
+            data.templates.remove(template_id);
+        }
+        self.write_to_file().await
+    }
 }
 
 // =============================================================================
@@ -453,6 +521,18 @@ impl SessionStore for NoopSessionStore {
     }
 
     async fn remove_project(&self, _project_id: &str) -> Result<(), ModelError> {
+        Ok(())
+    }
+
+    async fn load_templates(&self) -> Result<Vec<crate::model::types::Template>, ModelError> {
+        Ok(Vec::new())
+    }
+
+    async fn save_template(&self, _template_id: &str, _template: &PersistedTemplate) -> Result<(), ModelError> {
+        Ok(())
+    }
+
+    async fn remove_template(&self, _template_id: &str) -> Result<(), ModelError> {
         Ok(())
     }
 }
@@ -534,6 +614,7 @@ mod tests {
             last_working_at: Some(Utc::now()),
             project_id: None,
             last_input: None,
+            tags: Vec::new(),
         };
         let state2 = PersistedSessionState::with_name("Second Session".to_string());
 
@@ -622,6 +703,7 @@ mod tests {
                 last_working_at: Some(working_since),
                 project_id: None,
                 last_input: None,
+                tags: Vec::new(),
             };
             store.save("persistent-1", &state).await.unwrap();
         }
