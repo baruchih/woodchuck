@@ -18,7 +18,7 @@ import type { Session, Command } from '../types';
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getSession, deleteSession, sendInput, renameSession, moveToProject } = useSessions();
+  const { getSession, deleteSession, sendInput, uploadImage, renameSession, moveToProject } = useSessions();
   const { projects, refresh: refreshProjects } = useProjects();
   const { resize, sendRawInput } = useWS();
 
@@ -42,6 +42,10 @@ export function SessionPage() {
 
   // Ref to track if we're in slash mode (typing a slash command)
   const slashModeRef = useRef(false);
+
+  // Hidden file input for image upload
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Polling hook
   const { content, needsAttention, contextActions, triggerFastPoll, notifySentText } = useTerminal({
@@ -225,6 +229,32 @@ export function SessionPage() {
     setShowKillConfirm(true);
   }, []);
 
+  // Image upload: open file picker
+  const handleUploadImage = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  // Image upload: handle file selection
+  const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !decodedId || uploading) return;
+
+    setUploading(true);
+    try {
+      const path = await uploadImage(decodedId, file);
+      // Send the file path as input so Claude Code can read it
+      await sendInput(decodedId, `see this image: ${path}`);
+      triggerFastPoll();
+      notifySentText(`[uploaded image: ${file.name}]`);
+    } catch (err) {
+      console.error('Failed to upload image:', err);
+    } finally {
+      setUploading(false);
+      // Reset the input so the same file can be selected again
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [decodedId, uploading, uploadImage, sendInput, triggerFastPoll, notifySentText]);
+
   const handleShowInfo = useCallback(() => {
     setShowInfoSheet(true);
   }, []);
@@ -407,6 +437,7 @@ export function SessionPage() {
         contextActions={contextActions}
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
+        onUploadImage={handleUploadImage}
       />
 
       {/* Kill Session Confirm Dialog */}
@@ -430,6 +461,15 @@ export function SessionPage() {
           onMoveToProject={handleMoveToProject}
         />
       )}
+
+      {/* Hidden file input for image upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
     </Layout>
   );
 }

@@ -21,7 +21,7 @@ use super::handlers::{
     maintainer_inbox_handler, maintainer_pause_handler, maintainer_resume_handler,
     maintainer_status_handler, poll_handler, push_subscribe_handler, push_unsubscribe_handler,
     rename_project_handler, resize_handler, send_input_handler, update_session_handler,
-    vapid_key_handler,
+    upload_image_handler, vapid_key_handler,
 };
 use super::rate_limit::{RateLimiter, rate_limit_middleware};
 use super::state::AppState;
@@ -53,6 +53,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/:id/input", post(send_input_handler))
         .route("/sessions/:id/resize", post(resize_handler))
         .route("/sessions/:id/hook", post(hook_handler))
+        .route("/sessions/:id/upload", post(upload_image_handler))
         .route("/folders", post(create_folder_handler))
         .route("/projects", post(create_project_handler))
         .route("/projects/:id", patch(rename_project_handler))

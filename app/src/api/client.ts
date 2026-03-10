@@ -155,4 +155,20 @@ export const api = {
 
   rollbackDeploy: (): Promise<DeployTriggerResult> =>
     request('/deploy/rollback', { method: 'POST' }),
+
+  uploadImage: async (sessionId: string, file: File): Promise<{ path: string }> => {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const res = await fetch(
+      `${BASE_URL}/sessions/${encodeURIComponent(sessionId)}/upload`,
+      { method: 'POST', body: formData }
+    );
+
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Upload failed');
+    }
+    return data.data;
+  },
 };

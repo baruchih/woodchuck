@@ -3,7 +3,7 @@
 //! Handler functions for all API endpoints.
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -15,7 +15,8 @@ use super::response::{
     FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData, InputSentData,
     MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData, SessionCreatedData,
-    SessionData, SessionKilledData, SessionUpdatedData, SessionsData, VapidKeyData,
+    SessionData, SessionKilledData, SessionUpdatedData, SessionsData, UploadedImageData,
+    VapidKeyData,
 };
 use super::state::AppState;
 
@@ -765,6 +766,122 @@ pub async fn deploy_rollback_handler(
         }
         Err(msg) => Err(err_msg(StatusCode::BAD_REQUEST, &msg, "ROLLBACK_FAILED")),
     }
+}
+
+// =============================================================================
+// Image Upload
+// =============================================================================
+
+/// Maximum upload size: 10 MB
+const MAX_UPLOAD_SIZE: usize = 10 * 1024 * 1024;
+
+/// Allowed image MIME types and their file extensions
+fn image_extension(content_type: &str) -> Option<&'static str> {
+    match content_type {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/webp" => Some("webp"),
+        "image/gif" => Some("gif"),
+        _ => None,
+    }
+}
+
+/// POST /sessions/:id/upload - Upload an image for a session
+///
+/// The image is saved to `{data_dir}/uploads/` and the absolute file path
+/// is returned. The caller can then send this path as input to the session
+/// so Claude Code can read the image.
+#[instrument(skip(state, multipart))]
+pub async fn upload_image_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    mut multipart: Multipart,
+) -> ApiResultCreated<UploadedImageData> {
+    // Validate session exists
+    if !state.tmux.has_session(&session_id).await.map_err(err)? {
+        return Err(err(crate::model::ModelError::SessionNotFound(session_id)));
+    }
+
+    // Extract the image field from multipart
+    let field = multipart
+        .next_field()
+        .await
+        .map_err(|e| err_msg(StatusCode::BAD_REQUEST, &format!("Invalid multipart: {}", e), "INVALID_INPUT"))?
+        .ok_or_else(|| err_msg(StatusCode::BAD_REQUEST, "No file uploaded", "INVALID_INPUT"))?;
+
+    // Validate content type
+    let content_type = field
+        .content_type()
+        .unwrap_or("")
+        .to_string();
+    let ext = image_extension(&content_type)
+        .ok_or_else(|| err_msg(
+            StatusCode::BAD_REQUEST,
+            &format!("Unsupported image type: {}. Allowed: png, jpeg, webp, gif", content_type),
+            "INVALID_INPUT",
+        ))?;
+
+    // Read bytes with size limit
+    let data = field
+        .bytes()
+        .await
+        .map_err(|e| err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read upload: {}", e), "INVALID_INPUT"))?;
+
+    if data.len() > MAX_UPLOAD_SIZE {
+        return Err(err_msg(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            &format!("Image too large ({} bytes, max {} bytes)", data.len(), MAX_UPLOAD_SIZE),
+            "PAYLOAD_TOO_LARGE",
+        ));
+    }
+
+    // Validate magic bytes
+    let valid_magic = match ext {
+        "png" => data.starts_with(&[0x89, b'P', b'N', b'G']),
+        "jpg" => data.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "webp" => data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP",
+        "gif" => data.starts_with(b"GIF8"),
+        _ => false,
+    };
+    if !valid_magic {
+        return Err(err_msg(
+            StatusCode::BAD_REQUEST,
+            "File content does not match declared image type",
+            "INVALID_INPUT",
+        ));
+    }
+
+    // Generate unique filename: {timestamp}_{uuid_short}.{ext}
+    let now = chrono::Utc::now();
+    let timestamp = now.format("%Y%m%d_%H%M%S");
+    let uuid_short = &uuid::Uuid::new_v4().to_string()[..8];
+    let filename = format!("{}_{}.{}", timestamp, uuid_short, ext);
+
+    // Ensure uploads directory exists
+    let uploads_dir = std::path::PathBuf::from(&state.config.data_dir).join("uploads");
+    tokio::fs::create_dir_all(&uploads_dir)
+        .await
+        .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to create uploads dir: {}", e), "IO_ERROR"))?;
+
+    // Write file
+    let file_path = uploads_dir.join(&filename);
+    tokio::fs::write(&file_path, &data)
+        .await
+        .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to write file: {}", e), "IO_ERROR"))?;
+
+    // Get absolute path
+    let abs_path = file_path
+        .canonicalize()
+        .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to resolve path: {}", e), "IO_ERROR"))?
+        .to_string_lossy()
+        .to_string();
+
+    info!(session = %session_id, path = %abs_path, size = data.len(), "Image uploaded");
+
+    Ok((
+        StatusCode::CREATED,
+        ApiResponse::ok(UploadedImageData { path: abs_path }),
+    ))
 }
 
 /// DELETE /projects/:id - Delete a project (sessions become ungrouped)

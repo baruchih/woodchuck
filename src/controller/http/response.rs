@@ -312,6 +312,12 @@ pub struct DeployAbortData {
     pub aborted: bool,
 }
 
+/// Image upload response
+#[derive(Debug, Serialize)]
+pub struct UploadedImageData {
+    pub path: String,
+}
+
 // =============================================================================
 // IntoResponse Implementation
 // =============================================================================

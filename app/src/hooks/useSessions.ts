@@ -13,6 +13,7 @@ interface UseSessionsReturn {
   renameSession: (id: string, name: string) => Promise<void>;
   moveToProject: (id: string, projectId: string | null) => Promise<void>;
   sendInput: (id: string, text: string) => Promise<void>;
+  uploadImage: (id: string, file: File) => Promise<string>;
   clearError: () => void;
 }
 
@@ -69,6 +70,11 @@ export function useSessions(): UseSessionsReturn {
     await api.sendInput(id, text);
   }, []);
 
+  const uploadImage = useCallback(async (id: string, file: File): Promise<string> => {
+    const result = await api.uploadImage(id, file);
+    return result.path;
+  }, []);
+
   const clearError = useCallback(() => {
     setError(null);
   }, []);
@@ -84,6 +90,7 @@ export function useSessions(): UseSessionsReturn {
     renameSession,
     moveToProject,
     sendInput,
+    uploadImage,
     clearError,
   };
 }

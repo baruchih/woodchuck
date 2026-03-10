@@ -11,6 +11,7 @@ interface RadialMenuProps {
   contextActions: ContextAction[];
   onZoomIn?: () => void;
   onZoomOut?: () => void;
+  onUploadImage?: () => void;
 }
 
 interface KeyItem {
@@ -27,10 +28,11 @@ const INNER_KEYS: KeyItem[] = [
   { label: 'ESC', key: 'Escape', variant: 'ghost' },       // 9 o'clock
 ];
 
-// Zoom controls — always present on outer ring, before any context actions
+// Zoom controls + image upload — always present on outer ring, before any context actions
 const ZOOM_ITEMS: KeyItem[] = [
   { label: 'A+', key: '__zoom_in__', variant: 'ghost' },
   { label: 'A-', key: '__zoom_out__', variant: 'ghost' },
+  { label: 'IMG', key: '__upload__', variant: 'ghost' },
 ];
 
 const INNER_RADIUS = 65;
@@ -74,6 +76,7 @@ export function RadialMenu({
   contextActions,
   onZoomIn,
   onZoomOut,
+  onUploadImage,
 }: RadialMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -109,11 +112,14 @@ export function RadialMenu({
         onZoomIn?.();
       } else if (key === '__zoom_out__') {
         onZoomOut?.();
+      } else if (key === '__upload__') {
+        onClose();
+        onUploadImage?.();
       } else {
         onSendKey(key);
       }
     },
-    [onSendKey, onKillSession, onClose, onZoomIn, onZoomOut],
+    [onSendKey, onKillSession, onClose, onZoomIn, onZoomOut, onUploadImage],
   );
 
   if (!open) return null;
