@@ -149,10 +149,21 @@ impl DeployState {
             return DeployResult::Failed("Deploy already in progress".to_string());
         }
 
-        let result = self.execute_inner(push).await;
+        // Safety timeout: if execute_inner hangs, force-reset pending after 5 minutes
+        let result = tokio::time::timeout(
+            Duration::from_secs(300),
+            self.execute_inner(push),
+        ).await;
 
         self.inner.pending.store(false, Ordering::SeqCst);
-        result
+
+        match result {
+            Ok(deploy_result) => deploy_result,
+            Err(_) => {
+                error!("Deploy timed out after 5 minutes");
+                DeployResult::Failed("Deploy timed out".to_string())
+            }
+        }
     }
 
     async fn execute_inner(&self, push: &Arc<dyn WebPushClient>) -> DeployResult {
