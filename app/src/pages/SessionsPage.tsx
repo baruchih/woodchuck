@@ -9,12 +9,43 @@ import { LogoWatermark } from '../components/LogoWatermark';
 import { SessionInfoSheet } from '../components/SessionInfoSheet';
 import { ProjectSection } from '../components/ProjectSection';
 import { CreateProjectDialog } from '../components/CreateProjectDialog';
+import { GridCard } from '../components/GridCard';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
 import { useNotifications } from '../hooks/useNotifications';
 import { usePushSubscription } from '../hooks/usePushSubscription';
 import { useWS } from '../context/WebSocketContext';
 import type { Session, SessionStatus } from '../types';
+
+type ViewMode = 'list' | 'grid';
+
+const VIEW_MODE_KEY = 'woodchuck-view-mode';
+
+function loadViewMode(): ViewMode {
+  try {
+    const stored = localStorage.getItem(VIEW_MODE_KEY);
+    if (stored === 'grid' || stored === 'list') return stored;
+  } catch {
+    // Ignore
+  }
+  return 'list';
+}
+
+function saveViewMode(mode: ViewMode) {
+  try {
+    localStorage.setItem(VIEW_MODE_KEY, mode);
+  } catch {
+    // Ignore
+  }
+}
+
+/** Status priority for grid sorting (higher = more urgent) */
+const STATUS_PRIORITY: Record<SessionStatus, number> = {
+  needs_input: 4,
+  error: 3,
+  working: 2,
+  resting: 1,
+};
 
 const ALERT_STATUSES: Set<SessionStatus> = new Set(['needs_input', 'error']);
 
@@ -95,12 +126,16 @@ export function SessionsPage() {
     renameProject,
     deleteProject,
   } = useProjects();
-  const { subscribe, unsubscribe, onStatus } = useWS();
+  const { subscribe, unsubscribe, onStatus, onOutput } = useWS();
   const { notifySession } = useNotifications();
   const { isSubscribed: isPushSubscribed, isLoading: isPushLoading, subscribe: subscribePush } = usePushSubscription();
 
+  const [viewMode, setViewMode] = useState<ViewMode>(() => loadViewMode());
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
   const prevStatusRef = useRef<Map<string, SessionStatus>>(new Map());
+  // Live output per session for grid preview
+  const [sessionOutputs, setSessionOutputs] = useState<Map<string, string>>(new Map());
+  const [selectedGridIndex, setSelectedGridIndex] = useState(-1);
   const subscribedIdsRef = useRef<Set<string>>(new Set());
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
@@ -192,6 +227,105 @@ export function SessionsPage() {
       }
     }
   }, [sessions]);
+
+  // Capture live output for grid preview
+  useEffect(() => {
+    if (viewMode !== 'grid') return;
+    const unsub = onOutput((msg) => {
+      setSessionOutputs((prev) => {
+        const next = new Map(prev);
+        next.set(msg.session_id, msg.content);
+        return next;
+      });
+    });
+    return unsub;
+  }, [viewMode, onOutput]);
+
+  // Sort sessions by status priority for grid view
+  const sortedSessions = useMemo(() => {
+    if (viewMode !== 'grid') return sessions;
+    return [...sessions].sort((a, b) => {
+      const pa = STATUS_PRIORITY[a.status] ?? 0;
+      const pb = STATUS_PRIORITY[b.status] ?? 0;
+      if (pa !== pb) return pb - pa;
+      // Secondary sort: most recently updated first
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    });
+  }, [viewMode, sessions]);
+
+  // Grid keyboard navigation
+  useEffect(() => {
+    if (viewMode !== 'grid' || sortedSessions.length === 0) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle if user is in an input/textarea
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      // Determine grid columns from viewport width
+      const width = window.innerWidth;
+      let cols = 1;
+      if (width >= 1280) cols = 4; // xl
+      else if (width >= 1024) cols = 3; // lg
+      else if (width >= 640) cols = 2; // sm
+
+      const total = sortedSessions.length;
+
+      switch (e.key) {
+        case 'ArrowRight':
+          e.preventDefault();
+          setSelectedGridIndex((prev) => Math.min(prev + 1, total - 1));
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          setSelectedGridIndex((prev) => Math.max(prev - 1, 0));
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          setSelectedGridIndex((prev) => Math.min(prev + cols, total - 1));
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setSelectedGridIndex((prev) => Math.max(prev - cols, 0));
+          break;
+        case 'Enter': {
+          if (selectedGridIndex >= 0 && selectedGridIndex < total) {
+            const session = sortedSessions[selectedGridIndex];
+            navigate(`/session/${encodeURIComponent(session.id)}`);
+          }
+          break;
+        }
+        case 'Escape':
+          setSelectedGridIndex(-1);
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewMode, sortedSessions, selectedGridIndex, navigate]);
+
+  // Scroll selected grid card into view
+  useEffect(() => {
+    if (selectedGridIndex < 0 || viewMode !== 'grid') return;
+    const session = sortedSessions[selectedGridIndex];
+    if (!session) return;
+    const el = document.querySelector(`[data-session-id="${CSS.escape(session.id)}"]`);
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selectedGridIndex, viewMode, sortedSessions]);
+
+  const handleToggleViewMode = useCallback(() => {
+    setViewMode((prev) => {
+      const next = prev === 'list' ? 'grid' : 'list';
+      saveViewMode(next);
+      setSelectedGridIndex(-1);
+      return next;
+    });
+  }, []);
 
   const handleSessionClick = (session: Session) => {
     navigate(`/session/${encodeURIComponent(session.id)}`);
@@ -384,6 +518,33 @@ export function SessionsPage() {
 
   const rightAction = (
     <div className="flex items-center gap-2">
+      {/* View toggle (list/grid) */}
+      <button
+        onClick={handleToggleViewMode}
+        className="p-2 touch-target btn-active rounded-sm hover:bg-surface-alt text-text-muted hover:text-text"
+        aria-label={viewMode === 'list' ? 'Switch to grid view' : 'Switch to list view'}
+        title={viewMode === 'list' ? 'Grid view' : 'List view'}
+      >
+        {viewMode === 'list' ? (
+          /* Grid icon */
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+          </svg>
+        ) : (
+          /* List icon */
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <line x1="3" y1="6" x2="3.01" y2="6" />
+            <line x1="3" y1="12" x2="3.01" y2="12" />
+            <line x1="3" y1="18" x2="3.01" y2="18" />
+          </svg>
+        )}
+      </button>
       {isPushSubscribed !== null && (
         <button
           onClick={handleBellClick}
@@ -512,8 +673,8 @@ export function SessionsPage() {
               </div>
             )}
 
-            {/* Sessions grouped by project */}
-            {(sessions.length > 0 || projects.length > 0) && (
+            {/* Sessions: list or grid view */}
+            {(sessions.length > 0 || projects.length > 0) && viewMode === 'list' && (
               <div>
                 {/* Visible project sections */}
                 {visibleProjects.map((project) => {
@@ -558,6 +719,24 @@ export function SessionsPage() {
                   );
                 })()}
 
+              </div>
+            )}
+
+            {/* Grid view */}
+            {sessions.length > 0 && viewMode === 'grid' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {sortedSessions.map((session, index) => (
+                  <div key={session.id} className="h-[220px]">
+                    <GridCard
+                      session={session}
+                      output={sessionOutputs.get(session.id) ?? ''}
+                      onClick={() => handleSessionClick(session)}
+                      onDelete={handleDeleteRequest}
+                      onShowInfo={handleShowInfo}
+                      selected={index === selectedGridIndex}
+                    />
+                  </div>
+                ))}
               </div>
             )}
 
