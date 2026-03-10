@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ConnectionStatus } from './ConnectionStatus';
 
@@ -12,13 +12,32 @@ interface LayoutProps {
 
 export function Layout({ title, showBack = false, onBack, rightAction, children }: LayoutProps) {
   const navigate = useNavigate();
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleBack = onBack ?? (() => {
     navigate('/');
   });
 
+  // Use visualViewport API to handle mobile keyboard resizing.
+  // dvh doesn't reliably update on iOS Safari when the keyboard opens,
+  // but visualViewport.height always reflects the actual visible area.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      if (containerRef.current) {
+        containerRef.current.style.height = `${vv.height}px`;
+      }
+    };
+
+    update();
+    vv.addEventListener('resize', update);
+    return () => vv.removeEventListener('resize', update);
+  }, []);
+
   return (
-    <div className="h-dvh bg-background flex flex-col">
+    <div ref={containerRef} className="h-dvh bg-background flex flex-col">
       {/* Header */}
       <header className="bg-surface border-b border-border sticky top-0 z-40 pt-safe">
         <div className="flex items-center justify-between px-4 h-12">
