@@ -255,7 +255,7 @@ export function XtermTerminal({
       {/* Selectable text overlay — triggered by long-press */}
       {selectMode && (
         <div
-          className="fixed inset-0 z-50 flex flex-col bg-background/95"
+          className="fixed inset-0 z-50 flex flex-col bg-background"
           onClick={(e) => {
             // Close if tapping the backdrop (not selecting text)
             if (!window.getSelection()?.toString()) {
