@@ -18,7 +18,7 @@ export function Layout({ title, showBack = false, onBack, rightAction, children 
   });
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-dvh bg-background flex flex-col">
       {/* Header */}
       <header className="bg-surface border-b border-border sticky top-0 z-40 pt-safe">
         <div className="flex items-center justify-between px-4 h-12">
@@ -56,8 +56,8 @@ export function Layout({ title, showBack = false, onBack, rightAction, children 
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
+      {/* Main content — overflow-auto for scrollable pages, children can set overflow-hidden */}
+      <main className="flex-1 flex flex-col min-h-0 overflow-auto">{children}</main>
     </div>
   );
 }

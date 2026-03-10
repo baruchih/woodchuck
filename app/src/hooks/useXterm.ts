@@ -62,6 +62,7 @@ export function useXterm({
   const lastContentRef = useRef<string>('');
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
+  const composingRef = useRef(false);
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
 
   // Initialize terminal
@@ -119,13 +120,37 @@ export function useXterm({
     });
 
     // Handle keyboard input (use ref to always call latest onInput)
+    // Suppress onData during IME/autocomplete composition to prevent duplication
     const inputDisposable = terminal.onData((data) => {
+      if (composingRef.current) return;
       onInputRef.current(data);
     });
+
+    // Track mobile keyboard composition (autocomplete/prediction)
+    // xterm uses an internal textarea — listen for composition events on it
+    const xtermTextarea = container.querySelector('textarea');
+    const handleCompositionStart = () => {
+      composingRef.current = true;
+    };
+    const handleCompositionEnd = (e: CompositionEvent) => {
+      composingRef.current = false;
+      // Send the final composed text (the completed word)
+      if (e.data) {
+        onInputRef.current(e.data);
+      }
+    };
+    if (xtermTextarea) {
+      xtermTextarea.addEventListener('compositionstart', handleCompositionStart);
+      xtermTextarea.addEventListener('compositionend', handleCompositionEnd);
+    }
 
     // Cleanup
     return () => {
       inputDisposable.dispose();
+      if (xtermTextarea) {
+        xtermTextarea.removeEventListener('compositionstart', handleCompositionStart);
+        xtermTextarea.removeEventListener('compositionend', handleCompositionEnd);
+      }
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
