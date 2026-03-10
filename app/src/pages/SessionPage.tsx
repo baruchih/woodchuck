@@ -388,11 +388,15 @@ export function SessionPage() {
           />
         </div>
 
-        {/* Mobile input bar — native text input instead of xterm keyboard */}
+        {/* Mobile input bar — native text input + action toolbar instead of FAB */}
         {isMobile && (
           <MobileInputBar
             onSend={handleMobileSend}
+            onSendKey={handleSendKey}
             onUploadImage={handleUploadImage}
+            onKillSession={() => setShowKillConfirm(true)}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
             sending={sending}
           />
         )}
@@ -452,29 +456,33 @@ export function SessionPage() {
         )}
       </div>
 
-      {/* Floating Action Button */}
-      <FloatingActionButton
-        onTap={handleFabTap}
-        onCenterChange={handleFabCenterChange}
-        menuOpen={menuOpen}
-        needsAttention={needsAttention}
-        hasText={hasTypedText}
-        hasContextActions={contextActions.length > 0}
-      />
+      {/* Floating Action Button — desktop only (mobile uses input bar toolbar) */}
+      {!isMobile && (
+        <FloatingActionButton
+          onTap={handleFabTap}
+          onCenterChange={handleFabCenterChange}
+          menuOpen={menuOpen}
+          needsAttention={needsAttention}
+          hasText={hasTypedText}
+          hasContextActions={contextActions.length > 0}
+        />
+      )}
 
-      {/* Radial Menu */}
-      <RadialMenu
-        open={menuOpen}
-        centerX={fabCenter.x}
-        centerY={fabCenter.y}
-        onClose={handleMenuClose}
-        onSendKey={handleSendKey}
-        onKillSession={handleKillFromMenu}
-        contextActions={contextActions}
-        onZoomIn={zoomIn}
-        onZoomOut={zoomOut}
-        onUploadImage={handleUploadImage}
-      />
+      {/* Radial Menu — desktop only */}
+      {!isMobile && (
+        <RadialMenu
+          open={menuOpen}
+          centerX={fabCenter.x}
+          centerY={fabCenter.y}
+          onClose={handleMenuClose}
+          onSendKey={handleSendKey}
+          onKillSession={handleKillFromMenu}
+          contextActions={contextActions}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onUploadImage={handleUploadImage}
+        />
+      )}
 
       {/* Kill Session Confirm Dialog */}
       <ConfirmDialog
