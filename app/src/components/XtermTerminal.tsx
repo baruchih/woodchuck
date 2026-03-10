@@ -29,7 +29,7 @@ export function XtermTerminal({
   disableKeyboard = false,
   className = '',
 }: XtermTerminalProps) {
-  const { containerRef, write, focus, dimensions } = useXterm({
+  const { containerRef, write, focus, scrollLines, dimensions } = useXterm({
     fontSize,
     onInput,
     onResize,
@@ -40,14 +40,27 @@ export function XtermTerminal({
     write(content);
   }, [content, write]);
 
-  // Two-finger pinch-to-zoom only — single-finger scroll is handled by xterm.js
+  // Touch handling: single-finger momentum scroll + two-finger pinch-to-zoom
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
+    // ── Pinch-to-zoom state ──
     let pinchStartDist = 0;
     let lastZoomDirection: 'in' | 'out' | null = null;
     let isPinching = false;
+
+    // ── Momentum scroll state ──
+    let lastTouchY = 0;
+    let lastTouchTime = 0;
+    let velocityY = 0; // px/ms
+    let momentumRaf = 0;
+    let isSingleFingerScrolling = false;
+    // Accumulated sub-line pixel remainder for smooth scrolling
+    let pixelRemainder = 0;
+
+    // Approximate pixels per terminal line (fontSize * lineHeight)
+    const pxPerLine = fontSize * 1.4;
 
     function getTouchDistance(t1: Touch, t2: Touch): number {
       const dx = t1.clientX - t2.clientX;
@@ -55,8 +68,25 @@ export function XtermTerminal({
       return Math.sqrt(dx * dx + dy * dy);
     }
 
+    function stopMomentum() {
+      if (momentumRaf) {
+        cancelAnimationFrame(momentumRaf);
+        momentumRaf = 0;
+      }
+      velocityY = 0;
+      pixelRemainder = 0;
+    }
+
     const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) {
+      stopMomentum();
+
+      if (e.touches.length === 1) {
+        isSingleFingerScrolling = true;
+        lastTouchY = e.touches[0].clientY;
+        lastTouchTime = performance.now();
+        velocityY = 0;
+      } else if (e.touches.length === 2) {
+        isSingleFingerScrolling = false;
         isPinching = true;
         const dist = getTouchDistance(e.touches[0], e.touches[1]);
         if (dist < 1) return;
@@ -66,8 +96,10 @@ export function XtermTerminal({
     };
 
     const handleTouchMove = (e: TouchEvent) => {
+      // Pinch-to-zoom
       if (e.touches.length === 2 && isPinching && pinchStartDist > 0) {
         e.preventDefault();
+        isSingleFingerScrolling = false;
         const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
         const scale = currentDist / pinchStartDist;
         const direction: 'in' | 'out' = scale > 1 ? 'in' : 'out';
@@ -81,6 +113,26 @@ export function XtermTerminal({
           else onZoomOut();
           pinchStartDist = currentDist;
         }
+        return;
+      }
+
+      // Single-finger scroll — track velocity for momentum
+      if (e.touches.length === 1 && isSingleFingerScrolling) {
+        const touchY = e.touches[0].clientY;
+        const now = performance.now();
+        const dt = now - lastTouchTime;
+
+        if (dt > 0) {
+          const dy = lastTouchY - touchY; // positive = finger moved up = scroll down
+          // Exponential moving average for smoother velocity
+          const instantVelocity = dy / dt;
+          velocityY = velocityY * 0.6 + instantVelocity * 0.4;
+        }
+
+        lastTouchY = touchY;
+        lastTouchTime = now;
+        // xterm.js handles the actual touch-drag scrolling;
+        // we just track velocity for the momentum phase
       }
     };
 
@@ -90,6 +142,50 @@ export function XtermTerminal({
         lastZoomDirection = null;
         isPinching = false;
       }
+
+      // Start momentum if we had meaningful velocity
+      if (isSingleFingerScrolling && e.touches.length === 0) {
+        isSingleFingerScrolling = false;
+        const absV = Math.abs(velocityY);
+        // Only start momentum if velocity is meaningful (> 0.3 px/ms ≈ 300px/s)
+        if (absV > 0.3) {
+          pixelRemainder = 0;
+          const friction = 0.95; // decay factor per frame (~60fps)
+          const minVelocity = 0.05; // stop threshold px/ms
+
+          let lastFrameTime = performance.now();
+
+          const tick = () => {
+            const now = performance.now();
+            const frameDt = now - lastFrameTime;
+            lastFrameTime = now;
+
+            // Apply friction
+            velocityY *= friction;
+
+            if (Math.abs(velocityY) < minVelocity) {
+              velocityY = 0;
+              pixelRemainder = 0;
+              return;
+            }
+
+            // Convert velocity to pixels moved this frame
+            const pxDelta = velocityY * frameDt;
+            pixelRemainder += pxDelta;
+
+            // Convert accumulated pixels to whole lines
+            const lines = Math.trunc(pixelRemainder / pxPerLine);
+            if (lines !== 0) {
+              scrollLines(lines);
+              pixelRemainder -= lines * pxPerLine;
+            }
+
+            momentumRaf = requestAnimationFrame(tick);
+          };
+
+          momentumRaf = requestAnimationFrame(tick);
+        }
+      }
     };
 
     container.addEventListener('touchstart', handleTouchStart, { passive: true });
@@ -97,11 +193,12 @@ export function XtermTerminal({
     container.addEventListener('touchend', handleTouchEnd, { passive: true });
 
     return () => {
+      stopMomentum();
       container.removeEventListener('touchstart', handleTouchStart);
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [containerRef, onZoomIn, onZoomOut]);
+  }, [containerRef, onZoomIn, onZoomOut, fontSize, scrollLines]);
 
   // Handle click to focus (disabled on mobile where input bar handles input)
   const handleClick = useCallback(() => {
