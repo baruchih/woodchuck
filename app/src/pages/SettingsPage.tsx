@@ -158,6 +158,11 @@ export function SettingsPage() {
     try {
       const status = await api.getDeployStatus();
       setDeployStatus(status);
+      // Reset deploying flag if server is back and not pending
+      // (deploy succeeded — server re-exec'd)
+      if (deploying && !status.pending) {
+        setDeploying(false);
+      }
     } catch {
       // Deploy endpoint might not exist on older server
     }
@@ -169,9 +174,10 @@ export function SettingsPage() {
     try {
       await api.triggerDeploy();
       await refreshDeployStatus();
+      // Don't setDeploying(false) here — the server will re-exec.
+      // refreshDeployStatus polling will reset it when the new server is up.
     } catch (e) {
       console.error('Deploy failed:', e);
-    } finally {
       setDeploying(false);
     }
   };
