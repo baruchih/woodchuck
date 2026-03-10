@@ -63,6 +63,7 @@ export function useXterm({
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
   const composingRef = useRef(false);
+  const skipNextDataRef = useRef(false);
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
 
   // Initialize terminal
@@ -123,6 +124,11 @@ export function useXterm({
     // Suppress onData during IME/autocomplete composition to prevent duplication
     const inputDisposable = terminal.onData((data) => {
       if (composingRef.current) return;
+      // Skip exactly one onData after compositionend (xterm echoes the composed text)
+      if (skipNextDataRef.current) {
+        skipNextDataRef.current = false;
+        return;
+      }
       onInputRef.current(data);
     });
 
@@ -133,16 +139,14 @@ export function useXterm({
       composingRef.current = true;
     };
     const handleCompositionEnd = (e: CompositionEvent) => {
+      composingRef.current = false;
       // Send the final composed text (the completed word)
       if (e.data) {
         onInputRef.current(e.data);
+        // xterm fires onData right after compositionend with the same text.
+        // Skip exactly that one event to prevent duplication.
+        skipNextDataRef.current = true;
       }
-      // Keep composing flag true briefly — xterm fires onData right after
-      // compositionend with the same text, which would cause duplication.
-      // The 50ms delay lets that spurious onData get suppressed.
-      setTimeout(() => {
-        composingRef.current = false;
-      }, 50);
     };
     if (xtermTextarea) {
       xtermTextarea.addEventListener('compositionstart', handleCompositionStart);
