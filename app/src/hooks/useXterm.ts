@@ -17,6 +17,7 @@ interface UseXtermReturn {
   write: (content: string) => void;
   focus: () => void;
   blur: () => void;
+  scrollLines: (n: number) => void;
   dimensions: { cols: number; rows: number } | null;
 }
 
@@ -239,11 +240,17 @@ export function useXterm({
     terminalRef.current?.blur();
   }, []);
 
+  // Scroll by N lines (positive = down, negative = up)
+  const scrollLines = useCallback((n: number) => {
+    terminalRef.current?.scrollLines(n);
+  }, []);
+
   return {
     containerRef,
     write,
     focus,
     blur,
+    scrollLines,
     dimensions,
   };
 }
