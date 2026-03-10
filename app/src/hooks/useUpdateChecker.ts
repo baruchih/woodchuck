@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 const CHECK_INTERVAL = 30_000; // 30s
 
 /**
  * Polls /api/health and detects when build_id changes (server restarted).
- * Returns true when an update is available.
+ * Returns update state and a function to apply the update.
  */
-export function useUpdateChecker(): boolean {
+export function useUpdateChecker(): { updateAvailable: boolean; applyUpdate: () => void } {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const initialBuildId = useRef<string | null>(null);
 
@@ -34,5 +34,26 @@ export function useUpdateChecker(): boolean {
     return () => clearInterval(interval);
   }, []);
 
-  return updateAvailable;
+  // Force the service worker to update and reload the page
+  const applyUpdate = useCallback(async () => {
+    try {
+      const registration = await navigator.serviceWorker?.getRegistration();
+      if (registration?.waiting) {
+        // Tell the waiting SW to activate
+        registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        // Wait a moment for activation, then reload
+        setTimeout(() => window.location.reload(), 300);
+        return;
+      }
+      // No waiting SW — try unregistering and reloading to get fresh assets
+      if (registration) {
+        await registration.unregister();
+      }
+    } catch {
+      // Fall through to reload
+    }
+    window.location.reload();
+  }, []);
+
+  return { updateAvailable, applyUpdate };
 }
