@@ -4,6 +4,7 @@
 
 use axum::{
     extract::{State, WebSocketUpgrade},
+    middleware,
     response::IntoResponse,
     routing::{delete, get, patch, post},
     Router,
@@ -22,49 +23,53 @@ use super::handlers::{
     rename_project_handler, resize_handler, send_input_handler, update_session_handler,
     vapid_key_handler,
 };
+use super::rate_limit::{RateLimiter, rate_limit_middleware};
 use super::state::AppState;
 use crate::controller::ws::handler::handle_connection;
 
 /// Build the HTTP router with all routes
 pub fn build_router(state: AppState) -> Router {
-    // API routes
-    let api_router = Router::new()
-        // Health
+    // W10 FIX: Rate limiter for write endpoints (30 burst, 5/sec refill)
+    let write_limiter = RateLimiter::new(30.0, 5.0);
+
+    // Read-only routes (no rate limiting)
+    let read_routes = Router::new()
         .route("/health", get(health_handler))
-        // Sessions
         .route("/sessions", get(list_sessions_handler))
-        .route("/sessions", post(create_session_handler))
         .route("/sessions/:id", get(get_session_handler))
+        .route("/sessions/:id/poll", get(poll_handler))
+        .route("/folders", get(list_folders_handler))
+        .route("/projects", get(list_projects_handler))
+        .route("/push/vapid-key", get(vapid_key_handler))
+        .route("/commands", get(list_commands_handler))
+        .route("/maintainer/status", get(maintainer_status_handler))
+        .route("/deploy/status", get(deploy_status_handler));
+
+    // Write routes (rate limited)
+    let write_routes = Router::new()
+        .route("/sessions", post(create_session_handler))
         .route("/sessions/:id", delete(delete_session_handler))
         .route("/sessions/:id", patch(update_session_handler))
         .route("/sessions/:id/input", post(send_input_handler))
-        .route("/sessions/:id/poll", get(poll_handler))
         .route("/sessions/:id/resize", post(resize_handler))
         .route("/sessions/:id/hook", post(hook_handler))
-        // Folders
-        .route("/folders", get(list_folders_handler))
         .route("/folders", post(create_folder_handler))
-        // Projects
-        .route("/projects", get(list_projects_handler))
         .route("/projects", post(create_project_handler))
         .route("/projects/:id", patch(rename_project_handler))
         .route("/projects/:id", delete(delete_project_handler))
-        // Push notifications
-        .route("/push/vapid-key", get(vapid_key_handler))
         .route("/push/subscribe", post(push_subscribe_handler))
         .route("/push/unsubscribe", post(push_unsubscribe_handler))
-        // Commands
-        .route("/commands", get(list_commands_handler))
-        // Maintainer routes
-        .route("/maintainer/status", get(maintainer_status_handler))
         .route("/maintainer/inbox", post(maintainer_inbox_handler))
         .route("/maintainer/pause", post(maintainer_pause_handler))
         .route("/maintainer/resume", post(maintainer_resume_handler))
-        // Deploy routes
-        .route("/deploy/status", get(deploy_status_handler))
         .route("/deploy/trigger", post(deploy_trigger_handler))
         .route("/deploy/abort", post(deploy_abort_handler))
-        .route("/deploy/rollback", post(deploy_rollback_handler));
+        .route("/deploy/rollback", post(deploy_rollback_handler))
+        .route_layer(middleware::from_fn_with_state(write_limiter, rate_limit_middleware));
+
+    let api_router = Router::new()
+        .merge(read_routes)
+        .merge(write_routes);
 
     // Combine with state and middleware — includes WebSocket on same port
     let app = Router::new()

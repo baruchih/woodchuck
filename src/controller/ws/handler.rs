@@ -19,6 +19,9 @@ use crate::utils::TmuxClient;
 /// Max length for raw/text input via WebSocket (matches HTTP limit)
 const MAX_WS_INPUT_LEN: usize = 10_000;
 
+/// Max queued messages per WebSocket client before dropping
+const WS_CHANNEL_CAPACITY: usize = 256;
+
 /// Validate session ID format (mirrors model::session::validate_session_id)
 fn validate_ws_session_id(id: &str) -> bool {
     !id.is_empty()
@@ -36,8 +39,8 @@ pub async fn handle_connection(
 ) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
-    // Channel for sending messages to this client
-    let (tx, mut rx) = mpsc::unbounded_channel::<ServerMessage>();
+    // W8 FIX: Bounded channel to prevent unbounded memory growth for slow clients
+    let (tx, mut rx) = mpsc::channel::<ServerMessage>(WS_CHANNEL_CAPACITY);
 
     // Track subscriptions for this connection
     let subscriptions: Arc<tokio::sync::RwLock<HashSet<String>>> =
@@ -164,7 +167,7 @@ pub async fn handle_connection(
 /// Handle subscribe message
 async fn handle_subscribe(
     session_id: &str,
-    tx: &mpsc::UnboundedSender<ServerMessage>,
+    tx: &mpsc::Sender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
     session_states: &SharedSessionStates,
     subscribers: &SubscriberMap,
@@ -248,7 +251,7 @@ async fn handle_input(
     session_id: &str,
     text: &str,
     raw: bool,
-    tx: &mpsc::UnboundedSender<ServerMessage>,
+    tx: &mpsc::Sender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
 ) {
     if raw {
@@ -284,7 +287,7 @@ async fn handle_resize(
     session_id: &str,
     cols: u16,
     rows: u16,
-    tx: &mpsc::UnboundedSender<ServerMessage>,
+    tx: &mpsc::Sender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
 ) {
     // Validate dimensions

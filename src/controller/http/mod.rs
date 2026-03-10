@@ -5,6 +5,7 @@
 
 mod controller;
 mod handlers;
+pub mod rate_limit;
 mod response;
 mod routes;
 mod state;

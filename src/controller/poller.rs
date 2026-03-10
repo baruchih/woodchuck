@@ -23,12 +23,12 @@ use crate::utils::{NtfyClient, SessionStore, TmuxClient, WebPushClient};
 #[derive(Default)]
 pub struct SessionSubscribers {
     /// Channels to send messages to subscribers
-    pub senders: Vec<mpsc::UnboundedSender<ServerMessage>>,
+    pub senders: Vec<mpsc::Sender<ServerMessage>>,
 }
 
 impl SessionSubscribers {
     /// Add a new subscriber
-    pub fn add(&mut self, tx: mpsc::UnboundedSender<ServerMessage>) {
+    pub fn add(&mut self, tx: mpsc::Sender<ServerMessage>) {
         self.senders.push(tx);
     }
 
@@ -37,9 +37,18 @@ impl SessionSubscribers {
         self.senders.retain(|tx| !tx.is_closed());
     }
 
-    /// Broadcast message to all subscribers
+    /// Broadcast message to all subscribers (drops messages for slow clients)
     pub fn broadcast(&mut self, msg: ServerMessage) {
-        self.senders.retain(|tx| tx.send(msg.clone()).is_ok());
+        self.senders.retain(|tx| {
+            match tx.try_send(msg.clone()) {
+                Ok(()) => true,
+                Err(mpsc::error::TrySendError::Closed(_)) => false, // Remove dead sender
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    tracing::debug!("Dropping message for slow WebSocket client");
+                    true // Keep sender, just drop this message
+                }
+            }
+        });
     }
 
     /// Get subscriber count
@@ -66,7 +75,7 @@ pub async fn add_subscriber(
     subscribers: &SubscriberMap,
     session_states: &SharedSessionStates,
     session_id: &str,
-    tx: mpsc::UnboundedSender<ServerMessage>,
+    tx: mpsc::Sender<ServerMessage>,
 ) {
     // Add to subscriber map
     {

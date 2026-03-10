@@ -98,14 +98,22 @@ fn generate_session_id(folder: &str) -> String {
 pub async fn list_sessions(tmux: &(impl TmuxClient + ?Sized)) -> Result<Vec<Session>> {
     let raw_sessions = tmux.list_sessions().await?;
 
-    let mut sessions = Vec::new();
-    for info in raw_sessions {
-        // S2 FIX: Run capture_pane and detect_git_branch concurrently
-        let (output, git_branch) = tokio::join!(
-            tmux.capture_pane(&info.name, 50),
-            detect_git_branch(&info.folder)
-        );
-        let output = output.unwrap_or_default();
+    // W2 FIX: Run all capture_pane + detect_git_branch calls concurrently
+    let futures: Vec<_> = raw_sessions.iter().map(|info| {
+        let name = info.name.clone();
+        let folder = info.folder.clone();
+        async move {
+            let (output, git_branch) = tokio::join!(
+                tmux.capture_pane(&name, 50),
+                detect_git_branch(&folder)
+            );
+            (output.unwrap_or_default(), git_branch)
+        }
+    }).collect();
+
+    let results = futures::future::join_all(futures).await;
+
+    let sessions: Vec<Session> = raw_sessions.into_iter().zip(results).map(|(info, (output, git_branch))| {
         let status = detect_status(&output);
 
         let created_at = Utc.timestamp_opt(info.created, 0)
@@ -115,7 +123,7 @@ pub async fn list_sessions(tmux: &(impl TmuxClient + ?Sized)) -> Result<Vec<Sess
             .single()
             .unwrap_or_else(Utc::now);
 
-        sessions.push(Session {
+        Session {
             id: info.name.clone(),
             name: info.name,
             folder: info.folder,
@@ -126,8 +134,8 @@ pub async fn list_sessions(tmux: &(impl TmuxClient + ?Sized)) -> Result<Vec<Sess
             working_since: None, // Will be overlaid from shared state in handler
             project_id: None,    // Will be overlaid from shared state in handler
             last_input: None,    // Will be overlaid from shared state in handler
-        });
-    }
+        }
+    }).collect();
 
     info!(count = sessions.len(), "Listed sessions");
     Ok(sessions)
