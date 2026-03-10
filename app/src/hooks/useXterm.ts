@@ -60,6 +60,8 @@ export function useXterm({
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const lastContentRef = useRef<string>('');
+  const pendingContentRef = useRef<string | null>(null);
+  const userScrolledRef = useRef(false);
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
@@ -77,7 +79,7 @@ export function useXterm({
       fontSize,
       lineHeight: 1.4,
       theme: XTERM_THEME,
-      scrollback: 1000,
+      scrollback: 5000,
       convertEol: true,
       allowProposedApi: true,
     });
@@ -123,9 +125,25 @@ export function useXterm({
       onInputRef.current(data);
     });
 
+    // Track user scroll position to avoid overwriting while scrolled up
+    const scrollDisposable = terminal.onScroll(() => {
+      const viewport = terminal.buffer.active;
+      const isAtBottom = viewport.baseY <= viewport.viewportY;
+      userScrolledRef.current = !isAtBottom;
+
+      // If user scrolled back to bottom, flush any pending content
+      if (isAtBottom && pendingContentRef.current !== null) {
+        const pending = pendingContentRef.current;
+        pendingContentRef.current = null;
+        lastContentRef.current = pending;
+        terminal.write('\x1b[2J\x1b[H' + pending);
+      }
+    });
+
     // Cleanup
     return () => {
       inputDisposable.dispose();
+      scrollDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -191,12 +209,20 @@ export function useXterm({
   }, [onResize]);
 
   // Write content to terminal (full screen rewrite)
+  // If user has scrolled up, defer the update until they scroll back to bottom
   const write = useCallback((content: string) => {
     const terminal = terminalRef.current;
     if (!terminal) return;
 
     // Skip if content unchanged
     if (content === lastContentRef.current) return;
+
+    // If user is scrolled up, stash the content for later
+    if (userScrolledRef.current) {
+      pendingContentRef.current = content;
+      return;
+    }
+
     lastContentRef.current = content;
 
     // Clear screen and cursor home, then write full content
