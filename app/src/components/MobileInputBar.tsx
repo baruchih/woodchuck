@@ -7,7 +7,6 @@ interface MobileInputBarProps {
   onKillSession: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onCopyTerminal: () => void;
   sending?: boolean;
 }
 
@@ -18,7 +17,6 @@ export function MobileInputBar({
   onKillSession,
   onZoomIn,
   onZoomOut,
-  onCopyTerminal,
   sending,
 }: MobileInputBarProps) {
   const [text, setText] = useState('');
@@ -49,8 +47,7 @@ export function MobileInputBar({
         <ActionButton label="Tab" onClick={() => onSendKey('Tab')} />
         <ActionButton label="A+" onClick={onZoomIn} />
         <ActionButton label="A-" onClick={onZoomOut} />
-        <ActionButton label="Copy" onClick={onCopyTerminal} />
-        <ActionButton label="Kill" onClick={onKillSession} variant="danger" />
+<ActionButton label="Kill" onClick={onKillSession} variant="danger" />
       </div>
 
       {/* Text input row */}
