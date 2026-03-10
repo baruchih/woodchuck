@@ -38,7 +38,7 @@ export function MobileInputBar({
   }, [handleSend]);
 
   return (
-    <div className="border-t border-border bg-surface">
+    <div className="border-t border-border bg-surface shrink-0">
       {/* Quick action toolbar */}
       <div className="flex items-center gap-1 px-2 py-1 border-b border-border/50 overflow-x-auto">
         <ActionButton label="Enter" onClick={() => onSendKey('Enter')} />

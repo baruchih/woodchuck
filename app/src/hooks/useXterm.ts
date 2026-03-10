@@ -142,7 +142,7 @@ export function useXterm({
         pendingContentRef.current = null;
         lastContentRef.current = pending;
         writingRef.current = true;
-        terminal.write('\x1b[2J\x1b[H' + pending, () => {
+        terminal.write('\x1b[H\x1b[J' + pending, () => {
           writingRef.current = false;
         });
       }
@@ -233,9 +233,11 @@ export function useXterm({
 
     lastContentRef.current = content;
 
-    // Clear screen and cursor home, then write full content
+    // Move cursor to home position and clear from cursor to end of screen,
+    // then write content. Using ED(0) instead of ED(2) preserves scrollback
+    // so the user can scroll up through history.
     writingRef.current = true;
-    terminal.write('\x1b[2J\x1b[H' + content, () => {
+    terminal.write('\x1b[H\x1b[J' + content, () => {
       writingRef.current = false;
     });
   }, []);

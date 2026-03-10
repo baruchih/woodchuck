@@ -379,7 +379,7 @@ export function SessionPage() {
 
   return (
     <Layout title={title} showBack rightAction={infoButton}>
-      <div className="flex flex-col flex-1 overflow-hidden relative">
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden relative">
         {/* Error banner (if any) */}
         {error && (
           <div className="bg-status-error/20 border-b border-status-error px-3 py-2">
