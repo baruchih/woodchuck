@@ -28,21 +28,12 @@ export function Layout({ title, showBack = false, onBack, rightAction, children 
     const update = () => {
       if (containerRef.current) {
         containerRef.current.style.height = `${vv.height}px`;
-        // Pin the container to the top of the visual viewport.
-        // When the keyboard opens, the browser auto-scrolls to keep the
-        // focused textarea visible, pushing the page up. Counteract that
-        // by offsetting our container to match the viewport's scroll.
-        containerRef.current.style.top = `${vv.offsetTop}px`;
       }
     };
 
     update();
     vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    return () => {
-      vv.removeEventListener('resize', update);
-      vv.removeEventListener('scroll', update);
-    };
+    return () => vv.removeEventListener('resize', update);
   }, []);
 
   return (
