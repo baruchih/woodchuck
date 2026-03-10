@@ -457,4 +457,124 @@ mod tests {
             _ => panic!("Expected InvalidInput error"),
         }
     }
+
+    // =========================================================================
+    // validate_session_id tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_session_id_valid() {
+        assert!(validate_session_id("my-session_123").is_ok());
+        assert!(validate_session_id("a").is_ok());
+        assert!(validate_session_id("ABC").is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_id_empty() {
+        let err = validate_session_id("").unwrap_err();
+        assert!(matches!(err, ModelError::InvalidInput(msg) if msg.contains("empty")));
+    }
+
+    #[test]
+    fn test_validate_session_id_too_long() {
+        let long_id = "a".repeat(129);
+        let err = validate_session_id(&long_id).unwrap_err();
+        assert!(matches!(err, ModelError::InvalidInput(msg) if msg.contains("too long")));
+    }
+
+    #[test]
+    fn test_validate_session_id_128_chars_ok() {
+        let id = "a".repeat(128);
+        assert!(validate_session_id(&id).is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_id_starts_with_hyphen() {
+        let err = validate_session_id("-bad").unwrap_err();
+        assert!(matches!(err, ModelError::InvalidInput(msg) if msg.contains("hyphen")));
+    }
+
+    #[test]
+    fn test_validate_session_id_special_chars_rejected() {
+        assert!(validate_session_id("foo;bar").is_err());
+        assert!(validate_session_id("foo bar").is_err());
+        assert!(validate_session_id("foo$bar").is_err());
+        assert!(validate_session_id("foo{bar}").is_err());
+        assert!(validate_session_id("foo/bar").is_err());
+        assert!(validate_session_id("foo.bar").is_err());
+    }
+
+    // =========================================================================
+    // validate_session_name tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_session_name_valid() {
+        assert!(validate_session_name("My Session").is_ok());
+        assert!(validate_session_name("project-alpha (v2)").is_ok());
+        assert!(validate_session_name("日本語").is_ok());
+    }
+
+    #[test]
+    fn test_validate_session_name_empty() {
+        let err = validate_session_name("").unwrap_err();
+        assert!(matches!(err, ModelError::InvalidInput(msg) if msg.contains("empty")));
+    }
+
+    #[test]
+    fn test_validate_session_name_too_long() {
+        let long_name = "a".repeat(101);
+        let err = validate_session_name(&long_name).unwrap_err();
+        assert!(matches!(err, ModelError::InvalidInput(msg) if msg.contains("too long")));
+    }
+
+    #[test]
+    fn test_validate_session_name_control_chars_rejected() {
+        assert!(validate_session_name("foo\x00bar").is_err());
+        assert!(validate_session_name("foo\nbar").is_err());
+        assert!(validate_session_name("foo\tbar").is_err());
+    }
+
+    // =========================================================================
+    // generate_session_id tests
+    // =========================================================================
+
+    #[test]
+    fn test_generate_session_id_format() {
+        let id = generate_session_id("/home/user/projects/my-app");
+        // Should be "my-app_{6 alphanumeric chars}"
+        assert!(id.starts_with("my-app_"));
+        assert_eq!(id.len(), "my-app_".len() + 6);
+    }
+
+    #[test]
+    fn test_generate_session_id_sanitizes_special_chars() {
+        let id = generate_session_id("/home/user/my app (v2)");
+        // Spaces and parens should be stripped
+        assert!(id.starts_with("myappv2_"));
+    }
+
+    #[test]
+    fn test_generate_session_id_empty_folder_name() {
+        let id = generate_session_id("/");
+        // Should fall back to "session"
+        assert!(id.starts_with("session_"));
+    }
+
+    #[test]
+    fn test_generate_session_id_unique() {
+        let id1 = generate_session_id("/foo");
+        let id2 = generate_session_id("/foo");
+        // Random suffix makes them different (extremely high probability)
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_generate_session_id_passes_validation() {
+        // Generated IDs should always pass validation
+        for path in &["/foo", "/home/user/my-project", "/tmp/test_dir", "/a/b/c"] {
+            let id = generate_session_id(path);
+            assert!(validate_session_id(&id).is_ok(), "ID '{}' from path '{}' failed validation", id, path);
+        }
+    }
 }

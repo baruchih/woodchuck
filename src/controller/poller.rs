@@ -439,3 +439,178 @@ async fn cleanup_empty_subscribers(subscribers: &SubscriberMap) {
         debug!(session = %session_id, "Removed empty subscriber entry");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_msg(id: &str) -> ServerMessage {
+        ServerMessage::Status {
+            session_id: id.to_string(),
+            status: "working".to_string(),
+            timestamp: "2025-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_session_subscribers_default_empty() {
+        let subs = SessionSubscribers::default();
+        assert!(subs.is_empty());
+        assert_eq!(subs.count(), 0);
+    }
+
+    #[test]
+    fn test_add_subscriber() {
+        let mut subs = SessionSubscribers::default();
+        let (tx, _rx) = mpsc::channel(16);
+        subs.add(tx);
+        assert_eq!(subs.count(), 1);
+        assert!(!subs.is_empty());
+    }
+
+    #[test]
+    fn test_broadcast_delivers_to_all() {
+        let mut subs = SessionSubscribers::default();
+        let (tx1, mut rx1) = mpsc::channel(16);
+        let (tx2, mut rx2) = mpsc::channel(16);
+        subs.add(tx1);
+        subs.add(tx2);
+
+        subs.broadcast(make_test_msg("s1"));
+
+        assert!(rx1.try_recv().is_ok());
+        assert!(rx2.try_recv().is_ok());
+        assert_eq!(subs.count(), 2);
+    }
+
+    #[test]
+    fn test_broadcast_removes_closed_sender() {
+        let mut subs = SessionSubscribers::default();
+        let (tx1, _rx1) = mpsc::channel(16);
+        let (tx2, rx2) = mpsc::channel(16);
+        subs.add(tx1);
+        subs.add(tx2);
+
+        // Drop rx2 to close the channel
+        drop(rx2);
+
+        subs.broadcast(make_test_msg("s1"));
+        // tx2 should be removed, tx1 kept
+        assert_eq!(subs.count(), 1);
+    }
+
+    #[test]
+    fn test_broadcast_drops_for_full_channel() {
+        let mut subs = SessionSubscribers::default();
+        // Channel with capacity 1
+        let (tx, _rx) = mpsc::channel(1);
+        subs.add(tx);
+
+        // Fill the channel
+        subs.broadcast(make_test_msg("s1"));
+        // This should be dropped (channel full) but sender kept
+        subs.broadcast(make_test_msg("s2"));
+
+        assert_eq!(subs.count(), 1); // sender still there
+    }
+
+    #[test]
+    fn test_cleanup_removes_closed_channels() {
+        let mut subs = SessionSubscribers::default();
+        let (tx1, _rx1) = mpsc::channel(16);
+        let (tx2, rx2) = mpsc::channel(16);
+        subs.add(tx1);
+        subs.add(tx2);
+
+        drop(rx2);
+        subs.cleanup();
+
+        assert_eq!(subs.count(), 1);
+    }
+
+    #[test]
+    fn test_cleanup_keeps_open_channels() {
+        let mut subs = SessionSubscribers::default();
+        let (tx1, _rx1) = mpsc::channel(16);
+        let (tx2, _rx2) = mpsc::channel(16);
+        subs.add(tx1);
+        subs.add(tx2);
+
+        subs.cleanup();
+        assert_eq!(subs.count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_add_subscriber_updates_state() {
+        let subscribers = new_subscriber_map();
+        let session_states = crate::model::new_shared_states();
+
+        // Add session to state first
+        {
+            let mut states = session_states.write().await;
+            states.insert("s1".to_string(), crate::model::SessionState::new());
+        }
+
+        let (tx, _rx) = mpsc::channel(16);
+        add_subscriber(&subscribers, &session_states, "s1", tx).await;
+
+        let states = session_states.read().await;
+        assert_eq!(states.get("s1").unwrap().subscriber_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_remove_subscriber_updates_state() {
+        let subscribers = new_subscriber_map();
+        let session_states = crate::model::new_shared_states();
+
+        {
+            let mut states = session_states.write().await;
+            states.insert("s1".to_string(), crate::model::SessionState::new());
+        }
+
+        let (tx, rx) = mpsc::channel(16);
+        add_subscriber(&subscribers, &session_states, "s1", tx).await;
+
+        // Drop receiver to simulate disconnect
+        drop(rx);
+        remove_subscriber(&subscribers, &session_states, "s1").await;
+
+        let states = session_states.read().await;
+        assert_eq!(states.get("s1").unwrap().subscriber_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_empty_subscribers_removes_entries() {
+        let subscribers = new_subscriber_map();
+
+        // Add an entry with no senders
+        {
+            let mut subs = subscribers.write().await;
+            subs.insert("empty".to_string(), SessionSubscribers::default());
+        }
+
+        cleanup_empty_subscribers(&subscribers).await;
+
+        let subs = subscribers.read().await;
+        assert!(!subs.contains_key("empty"));
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_empty_subscribers_keeps_active() {
+        let subscribers = new_subscriber_map();
+
+        // Keep _rx alive outside the block so the channel stays open
+        let (tx, _rx) = mpsc::channel(16);
+        {
+            let mut subs = subscribers.write().await;
+            let mut session_subs = SessionSubscribers::default();
+            session_subs.add(tx);
+            subs.insert("active".to_string(), session_subs);
+        }
+
+        cleanup_empty_subscribers(&subscribers).await;
+
+        let subs = subscribers.read().await;
+        assert!(subs.contains_key("active"));
+    }
+}
