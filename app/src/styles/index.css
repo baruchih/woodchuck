@@ -10,14 +10,9 @@
   --sal: env(safe-area-inset-left);
 }
 
-/* Prevent body scroll on iOS — the app is a fixed full-screen layout,
-   so document-level scrolling only causes the viewport to jump when
-   the mobile keyboard opens. All scrolling happens inside components. */
+/* Prevent body scroll bounce on iOS */
 html, body {
   overflow: hidden;
-  position: fixed;
-  width: 100%;
-  height: 100%;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
 }

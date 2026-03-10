@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck — Uses Node fs/path which aren't in the browser tsconfig
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
@@ -7,50 +6,38 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(__dirname, '../../styles/index.css'), 'utf-8');
+const indexHtml = readFileSync(join(__dirname, '../../../index.html'), 'utf-8');
 const layout = readFileSync(join(__dirname, '../Layout.tsx'), 'utf-8');
 
 /**
- * Verify CSS rules and Layout component patterns that prevent the
- * terminal from jumping when the mobile keyboard opens.
+ * Verify the viewport meta tag, CSS rules, and Layout component
+ * that prevent the terminal from jumping when the mobile keyboard opens.
  */
 
-describe('Mobile keyboard viewport CSS', () => {
-  it('has overflow:hidden on html,body to prevent document scroll', () => {
+describe('Mobile keyboard viewport', () => {
+  it('viewport meta tag includes interactive-widget=resizes-content', () => {
+    expect(indexHtml).toContain('interactive-widget=resizes-content');
+  });
+
+  it('html,body has overflow:hidden to prevent document scroll', () => {
     expect(css).toContain('overflow: hidden');
   });
 
-  it('has position:fixed on html,body to lock the body', () => {
-    expect(css).toContain('position: fixed');
-  });
-
-  it('has width/height 100% so body fills viewport', () => {
-    expect(css).toContain('width: 100%');
-    expect(css).toContain('height: 100%');
-  });
-
-  it('retains overscroll-behavior: none', () => {
+  it('html,body has overscroll-behavior: none', () => {
     expect(css).toContain('overscroll-behavior: none');
   });
 });
 
-describe('Layout component viewport handling', () => {
-  it('uses position:fixed container', () => {
-    expect(layout).toContain('fixed');
+describe('Layout component', () => {
+  it('uses h-dvh for dynamic viewport height', () => {
+    expect(layout).toContain('h-dvh');
   });
 
-  it('references visualViewport for dynamic height', () => {
-    expect(layout).toContain('visualViewport');
+  it('uses overflow-hidden on the root container', () => {
+    expect(layout).toContain('overflow-hidden');
   });
 
-  it('sets height from visualViewport.height', () => {
-    expect(layout).toContain('vv.height');
-  });
-
-  it('listens for visualViewport resize events', () => {
-    expect(layout).toContain("vv.addEventListener('resize'");
-  });
-
-  it('does not use scrollTo hack (body scroll is prevented by CSS)', () => {
-    expect(layout).not.toContain('scrollTo');
+  it('does not use visualViewport JS (handled by interactive-widget)', () => {
+    expect(layout).not.toContain('visualViewport');
   });
 });
