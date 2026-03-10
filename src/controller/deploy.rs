@@ -319,30 +319,24 @@ impl DeployState {
     }
 }
 
-/// Re-exec the current process with the same arguments.
+/// Restart the server by spawning a new process and exiting the current one.
 ///
-/// This replaces the current process entirely (Unix exec).
-/// Only call this after graceful shutdown of HTTP/WS/poller.
-#[cfg(unix)]
+/// Uses spawn + exit instead of exec() to avoid inheriting the old listening
+/// socket, which can cause "address already in use" failures on the new process.
+/// The parent exits cleanly (freeing port 1212), then the child starts fresh.
 pub fn re_exec() -> ! {
-    use std::os::unix::process::CommandExt;
-
     let exe = std::env::current_exe().expect("Failed to get current exe path");
     let args: Vec<String> = std::env::args().collect();
 
-    info!(binary = %exe.display(), "Re-execing process");
+    info!(binary = %exe.display(), "Spawning new process and exiting");
 
-    let err = std::process::Command::new(&exe)
+    std::process::Command::new(&exe)
         .args(&args[1..])
-        .exec();
+        .spawn()
+        .expect("Failed to spawn new process");
 
-    // exec() only returns on error
-    panic!("Failed to re-exec: {}", err);
-}
-
-#[cfg(not(unix))]
-pub fn re_exec() -> ! {
-    panic!("Re-exec not supported on this platform");
+    // Exit cleanly so the port is freed before the child tries to bind
+    std::process::exit(0);
 }
 
 #[cfg(test)]
