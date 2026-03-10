@@ -258,14 +258,20 @@ export function useXterm({
     terminalRef.current?.scrollLines(n);
   }, []);
 
-  // Get all terminal text content (strips ANSI, returns clean text)
+  // Get all terminal text content by reading the buffer directly (no side effects)
   const getTextContent = useCallback((): string => {
     const terminal = terminalRef.current;
     if (!terminal) return '';
-    terminal.selectAll();
-    const text = terminal.getSelection();
-    terminal.clearSelection();
-    return text;
+    const buffer = terminal.buffer.active;
+    const lines: string[] = [];
+    for (let i = 0; i < buffer.length; i++) {
+      const line = buffer.getLine(i);
+      if (line) lines.push(line.translateToString(true));
+    }
+    while (lines.length > 0 && lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+    return lines.join('\n');
   }, []);
 
   return {
