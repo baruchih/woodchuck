@@ -18,6 +18,7 @@ interface UseXtermReturn {
   focus: () => void;
   blur: () => void;
   scrollLines: (n: number) => void;
+  getTextContent: () => string;
   dimensions: { cols: number; rows: number } | null;
 }
 
@@ -257,12 +258,23 @@ export function useXterm({
     terminalRef.current?.scrollLines(n);
   }, []);
 
+  // Get all terminal text content (strips ANSI, returns clean text)
+  const getTextContent = useCallback((): string => {
+    const terminal = terminalRef.current;
+    if (!terminal) return '';
+    terminal.selectAll();
+    const text = terminal.getSelection();
+    terminal.clearSelection();
+    return text;
+  }, []);
+
   return {
     containerRef,
     write,
     focus,
     blur,
     scrollLines,
+    getTextContent,
     dimensions,
   };
 }

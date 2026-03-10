@@ -8,7 +8,7 @@ import { RadialMenu } from '../components/RadialMenu';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SlashCommandMenu, useSlashCommandState } from '../components/SlashCommandMenu';
 import { SessionInfoSheet } from '../components/SessionInfoSheet';
-import { XtermTerminal } from '../components/XtermTerminal';
+import { XtermTerminal, type XtermTerminalHandle } from '../components/XtermTerminal';
 import { MobileInputBar } from '../components/MobileInputBar';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
@@ -45,6 +45,9 @@ export function SessionPage() {
 
   // Ref to track if we're in slash mode (typing a slash command)
   const slashModeRef = useRef(false);
+
+  // Terminal ref for copy-all
+  const terminalRef = useRef<XtermTerminalHandle>(null);
 
   // Hidden file input for image upload
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -250,6 +253,25 @@ export function SessionPage() {
     }
   }, [decodedId, sending, sendInput, triggerFastPoll, notifySentText]);
 
+  // Copy terminal content to clipboard
+  const handleCopyTerminal = useCallback(async () => {
+    const text = terminalRef.current?.getTextContent();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for older browsers / insecure contexts
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+  }, []);
+
   // Image upload: open file picker
   const handleUploadImage = useCallback(() => {
     fileInputRef.current?.click();
@@ -389,6 +411,7 @@ export function SessionPage() {
         {/* Terminal output area — fills all available space */}
         <div className={`flex-1 min-h-0 overflow-hidden ${attentionClass}`}>
           <XtermTerminal
+            ref={terminalRef}
             sessionId={decodedId}
             content={content}
             fontSize={fontSize}
@@ -409,6 +432,7 @@ export function SessionPage() {
             onKillSession={() => setShowKillConfirm(true)}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
+            onCopyTerminal={handleCopyTerminal}
             sending={sending}
           />
         )}

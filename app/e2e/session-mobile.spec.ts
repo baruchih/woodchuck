@@ -98,7 +98,7 @@ test.describe('Session Page - Mobile', () => {
     test.skip(!isMobile, 'Mobile-only test');
 
     // All action buttons should be present and clickable
-    const buttons = ['Enter', 'Esc', 'C-c', 'Tab', 'A+', 'A-', 'Kill'];
+    const buttons = ['Enter', 'Esc', 'C-c', 'Tab', 'A+', 'A-', 'Copy', 'Kill'];
     for (const name of buttons) {
       const btn = page.getByRole('button', { name, exact: true });
       await expect(btn).toBeVisible({ timeout: 3000 });

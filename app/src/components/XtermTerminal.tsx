@@ -1,8 +1,12 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { useXterm } from '../hooks/useXterm';
 
 // ── Interface ──
+
+export interface XtermTerminalHandle {
+  getTextContent: () => string;
+}
 
 export interface XtermTerminalProps {
   sessionId: string;
@@ -19,7 +23,7 @@ export interface XtermTerminalProps {
 
 // ── Component ──
 
-export function XtermTerminal({
+export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>(function XtermTerminal({
   content,
   fontSize,
   onInput,
@@ -28,12 +32,15 @@ export function XtermTerminal({
   onZoomOut,
   disableKeyboard = false,
   className = '',
-}: XtermTerminalProps) {
-  const { containerRef, write, focus, scrollLines, dimensions } = useXterm({
+}, ref) {
+  const { containerRef, write, focus, scrollLines, getTextContent, dimensions } = useXterm({
     fontSize,
     onInput,
     onResize,
   });
+
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({ getTextContent }), [getTextContent]);
 
   // Write content when it changes
   useEffect(() => {
@@ -216,4 +223,4 @@ export function XtermTerminal({
       data-dimensions={dimensions ? `${dimensions.cols}x${dimensions.rows}` : ''}
     />
   );
-}
+});
