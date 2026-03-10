@@ -28,16 +28,25 @@ export function Layout({ title, showBack = false, onBack, rightAction, children 
     const update = () => {
       if (containerRef.current) {
         containerRef.current.style.height = `${vv.height}px`;
+        // Pin the container to the top of the visual viewport.
+        // When the keyboard opens, the browser auto-scrolls to keep the
+        // focused textarea visible, pushing the page up. Counteract that
+        // by offsetting our container to match the viewport's scroll.
+        containerRef.current.style.top = `${vv.offsetTop}px`;
       }
     };
 
     update();
     vv.addEventListener('resize', update);
-    return () => vv.removeEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
   }, []);
 
   return (
-    <div ref={containerRef} className="h-dvh bg-background flex flex-col">
+    <div ref={containerRef} className="fixed inset-x-0 top-0 h-dvh bg-background flex flex-col">
       {/* Header */}
       <header className="bg-surface border-b border-border sticky top-0 z-40 pt-safe">
         <div className="flex items-center justify-between px-4 h-12">
