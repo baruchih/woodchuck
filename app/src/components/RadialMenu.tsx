@@ -54,14 +54,14 @@ const outerVariantClasses: Record<KeyItem['variant'], string> = {
 
 function outerAngles(count: number): number[] {
   if (count === 0) return [];
-  // Evenly space items starting at top-right (-PI/4 ≈ 1:30 position)
-  // For small counts use hand-tuned diagonal positions to avoid
-  // overlapping with the inner ring's cardinal buttons.
-  if (count <= 4) {
-    const diagonals = [-Math.PI / 4, Math.PI / 4, (3 * Math.PI) / 4, (-3 * Math.PI) / 4];
+  // Evenly space items around the circle, starting between inner ring
+  // cardinal positions (offset by π/4 to sit in diagonal gaps).
+  // For 2 items, use top-right and bottom-right diagonals.
+  if (count <= 2) {
+    const diagonals = [-Math.PI / 4, Math.PI / 4];
     return diagonals.slice(0, count);
   }
-  // 5+ items: evenly spaced around the full circle, starting at top (-PI/2)
+  // 3+ items: evenly spaced around the full circle, starting at top (-PI/2)
   const step = (2 * Math.PI) / count;
   return Array.from({ length: count }, (_, i) => -Math.PI / 2 + i * step);
 }
