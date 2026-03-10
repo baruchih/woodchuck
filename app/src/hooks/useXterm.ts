@@ -133,11 +133,16 @@ export function useXterm({
       composingRef.current = true;
     };
     const handleCompositionEnd = (e: CompositionEvent) => {
-      composingRef.current = false;
       // Send the final composed text (the completed word)
       if (e.data) {
         onInputRef.current(e.data);
       }
+      // Keep composing flag true briefly — xterm fires onData right after
+      // compositionend with the same text, which would cause duplication.
+      // The 50ms delay lets that spurious onData get suppressed.
+      setTimeout(() => {
+        composingRef.current = false;
+      }, 50);
     };
     if (xtermTextarea) {
       xtermTextarea.addEventListener('compositionstart', handleCompositionStart);
