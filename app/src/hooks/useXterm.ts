@@ -63,6 +63,7 @@ export function useXterm({
   const lastContentRef = useRef<string>('');
   const pendingContentRef = useRef<string | null>(null);
   const userScrolledRef = useRef(false);
+  const writingRef = useRef(false); // true while we're writing content (ignore scroll events)
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
@@ -128,6 +129,9 @@ export function useXterm({
 
     // Track user scroll position to avoid overwriting while scrolled up
     const scrollDisposable = terminal.onScroll(() => {
+      // Ignore scroll events caused by our own writes
+      if (writingRef.current) return;
+
       const viewport = terminal.buffer.active;
       const isAtBottom = viewport.baseY <= viewport.viewportY;
       userScrolledRef.current = !isAtBottom;
@@ -137,7 +141,10 @@ export function useXterm({
         const pending = pendingContentRef.current;
         pendingContentRef.current = null;
         lastContentRef.current = pending;
-        terminal.write('\x1b[2J\x1b[H' + pending);
+        writingRef.current = true;
+        terminal.write('\x1b[2J\x1b[H' + pending, () => {
+          writingRef.current = false;
+        });
       }
     });
 
@@ -227,7 +234,10 @@ export function useXterm({
     lastContentRef.current = content;
 
     // Clear screen and cursor home, then write full content
-    terminal.write('\x1b[2J\x1b[H' + content);
+    writingRef.current = true;
+    terminal.write('\x1b[2J\x1b[H' + content, () => {
+      writingRef.current = false;
+    });
   }, []);
 
   // Focus terminal
