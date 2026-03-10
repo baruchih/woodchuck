@@ -7,6 +7,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SlashCommandMenu, useSlashCommandState } from '../components/SlashCommandMenu';
 import { SessionInfoSheet } from '../components/SessionInfoSheet';
 import { XtermTerminal } from '../components/XtermTerminal';
+import { MobileInputBar } from '../components/MobileInputBar';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
 import { useTerminal } from '../hooks/useTerminal';
@@ -46,6 +47,9 @@ export function SessionPage() {
   // Hidden file input for image upload
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+
+  // Detect mobile (touch device with narrow screen)
+  const isMobile = 'ontouchstart' in window && window.innerWidth < 768;
 
   // Polling hook
   const { content, needsAttention, contextActions, triggerFastPoll, notifySentText } = useTerminal({
@@ -229,6 +233,21 @@ export function SessionPage() {
     setShowKillConfirm(true);
   }, []);
 
+  // Mobile input bar: send text as input
+  const handleMobileSend = useCallback(async (text: string) => {
+    if (!decodedId || sending) return;
+    setSending(true);
+    try {
+      await sendInput(decodedId, text);
+      triggerFastPoll();
+      notifySentText(text);
+    } catch (err) {
+      console.error('Failed to send input:', err);
+    } finally {
+      setSending(false);
+    }
+  }, [decodedId, sending, sendInput, triggerFastPoll, notifySentText]);
+
   // Image upload: open file picker
   const handleUploadImage = useCallback(() => {
     fileInputRef.current?.click();
@@ -365,8 +384,18 @@ export function SessionPage() {
             onResize={handleTerminalResize}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
+            disableKeyboard={isMobile}
           />
         </div>
+
+        {/* Mobile input bar — native text input instead of xterm keyboard */}
+        {isMobile && (
+          <MobileInputBar
+            onSend={handleMobileSend}
+            onUploadImage={handleUploadImage}
+            sending={sending}
+          />
+        )}
 
         {/* Typing preview bar with slash command menu */}
         {(hasTypedText || showSlashMenu) && (

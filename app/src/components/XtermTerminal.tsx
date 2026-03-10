@@ -12,6 +12,8 @@ export interface XtermTerminalProps {
   onResize: (cols: number, rows: number) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  /** When true, tapping the terminal won't open the keyboard (mobile input bar handles input) */
+  disableKeyboard?: boolean;
   className?: string;
 }
 
@@ -24,6 +26,7 @@ export function XtermTerminal({
   onResize,
   onZoomIn,
   onZoomOut,
+  disableKeyboard = false,
   className = '',
 }: XtermTerminalProps) {
   const { containerRef, write, focus, dimensions } = useXterm({
@@ -109,12 +112,13 @@ export function XtermTerminal({
     };
   }, [containerRef, onZoomIn, onZoomOut]);
 
-  // Handle click to focus
+  // Handle click to focus (disabled on mobile where input bar handles input)
   const handleClick = useCallback(() => {
+    if (disableKeyboard) return;
     // Don't focus if user is selecting text
     if (window.getSelection()?.toString()) return;
     focus();
-  }, [focus]);
+  }, [focus, disableKeyboard]);
 
   return (
     <div
