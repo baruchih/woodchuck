@@ -176,18 +176,26 @@ export function useXterm({
     }
   }, [fontSize, onResize]);
 
-  // Handle container resize
+  // Handle container resize — only refit when WIDTH changes.
+  // Height-only changes (mobile keyboard open/close) should not refit,
+  // because refitting triggers a full terminal clear + rewrite which
+  // causes a visible jump. The terminal scrolls naturally instead.
   useEffect(() => {
     const container = containerRef.current;
     const fitAddon = fitAddonRef.current;
     const terminal = terminalRef.current;
     if (!container || !fitAddon || !terminal) return;
 
+    let lastWidth = container.clientWidth;
+
     const observer = new ResizeObserver(() => {
-      // Debounce slightly to avoid excessive resize calls
       requestAnimationFrame(() => {
+        const currentWidth = container.clientWidth;
+        // Skip height-only changes (keyboard open/close)
+        if (currentWidth === lastWidth) return;
+        lastWidth = currentWidth;
+
         try {
-          // Check if container has dimensions before fitting
           const proposedDims = fitAddon.proposeDimensions();
           if (!proposedDims) return;
           fitAddon.fit();

@@ -234,23 +234,30 @@ export function SessionPage() {
     fileInputRef.current?.click();
   }, []);
 
-  // Image upload: handle file selection
+  // Image upload: handle file selection (supports multiple)
   const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !decodedId || uploading) return;
+    const files = e.target.files;
+    if (!files || files.length === 0 || !decodedId || uploading) return;
 
     setUploading(true);
     try {
-      const path = await uploadImage(decodedId, file);
-      // Send the file path as input so Claude Code can read it
-      await sendInput(decodedId, `see this image: ${path}`);
+      const paths: string[] = [];
+      for (const file of Array.from(files)) {
+        const path = await uploadImage(decodedId, file);
+        paths.push(path);
+      }
+      // Send all file paths as input so Claude Code can read them
+      const msg = paths.length === 1
+        ? `see this image: ${paths[0]}`
+        : `see these images: ${paths.join(' ')}`;
+      await sendInput(decodedId, msg);
       triggerFastPoll();
-      notifySentText(`[uploaded image: ${file.name}]`);
+      notifySentText(`[uploaded ${paths.length} image${paths.length > 1 ? 's' : ''}]`);
     } catch (err) {
       console.error('Failed to upload image:', err);
     } finally {
       setUploading(false);
-      // Reset the input so the same file can be selected again
+      // Reset the input so the same files can be selected again
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [decodedId, uploading, uploadImage, sendInput, triggerFastPoll, notifySentText]);
@@ -467,6 +474,7 @@ export function SessionPage() {
         ref={fileInputRef}
         type="file"
         accept="image/png,image/jpeg,image/webp,image/gif"
+        multiple
         className="hidden"
         onChange={handleFileSelected}
       />
