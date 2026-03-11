@@ -302,7 +302,10 @@ async fn poll_session(
     };
 
     if let Some(current_status) = current_status {
-        let should_notify = !has_subscribers && matches!(current_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
+        // Skip only Resting notifications when session is open (user is watching).
+        // NeedsInput and Error always notify — the user may have their screen off.
+        let suppress_resting = has_subscribers && current_status == SessionStatus::Resting;
+        let should_notify = !suppress_resting && matches!(current_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
             let mut states = session_states.write().await;
             if let Some(state) = states.get_mut(session_id) {
                 if state.last_notified_status == Some(current_status) {
