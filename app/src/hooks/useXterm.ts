@@ -145,6 +145,7 @@ export function useXterm({
         writingRef.current = true;
         terminal.write('\x1b[H\x1b[J' + pending, () => {
           writingRef.current = false;
+          terminal.scrollToBottom();
         });
       }
     });
@@ -240,6 +241,7 @@ export function useXterm({
     writingRef.current = true;
     terminal.write('\x1b[H\x1b[J' + content, () => {
       writingRef.current = false;
+      terminal.scrollToBottom();
     });
   }, []);
 
