@@ -330,8 +330,10 @@ pub fn re_exec() -> ! {
 
     info!(binary = %exe.display(), "Spawning new process and exiting");
 
+    // Set env var so the child knows to wait for the parent to release the port
     std::process::Command::new(&exe)
         .args(&args[1..])
+        .env("WOODCHUCK_RESTART_DELAY", "1")
         .spawn()
         .expect("Failed to spawn new process");
 
