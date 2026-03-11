@@ -294,18 +294,8 @@ async fn poll_session(
         states.get(session_id).map(|s| s.status)
     };
 
-    // Skip push notifications if the session has active WebSocket subscribers
-    // (someone is viewing it right now — no need to notify)
-    let has_subscribers = {
-        let subs = subscribers.read().await;
-        subs.get(session_id).map_or(false, |s| !s.is_empty())
-    };
-
     if let Some(current_status) = current_status {
-        // Skip only Resting notifications when session is open (user is watching).
-        // NeedsInput and Error always notify — the user may have their screen off.
-        let suppress_resting = has_subscribers && current_status == SessionStatus::Resting;
-        let should_notify = !suppress_resting && matches!(current_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
+        let should_notify = matches!(current_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
             let mut states = session_states.write().await;
             if let Some(state) = states.get_mut(session_id) {
                 if state.last_notified_status == Some(current_status) {
