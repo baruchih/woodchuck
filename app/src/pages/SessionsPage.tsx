@@ -580,6 +580,20 @@ export function SessionsPage() {
 
   const rightAction = (
     <div className="flex items-center gap-2">
+      {/* Multi-session view */}
+      <button
+        onClick={() => navigate('/multi')}
+        className="p-2 touch-target btn-active rounded-sm hover:bg-surface-alt text-text-muted hover:text-text"
+        aria-label="Multi-session view"
+        title="Multi-session view"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+          <rect x="3" y="3" width="8" height="8" rx="1" />
+          <rect x="13" y="3" width="8" height="8" rx="1" />
+          <rect x="3" y="13" width="8" height="8" rx="1" />
+          <rect x="13" y="13" width="8" height="8" rx="1" />
+        </svg>
+      </button>
       {/* View toggle (list/grid) */}
       <button
         onClick={handleToggleViewMode}

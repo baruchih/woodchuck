@@ -8,6 +8,7 @@ import { SessionPage } from './pages/SessionPage';
 import { NewSessionPage } from './pages/NewSessionPage';
 import { InsultSwordFightPage } from './pages/InsultSwordFightPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { MultiSessionPage } from './pages/MultiSessionPage';
 
 export function App() {
   // Re-register push subscription on app startup (handles server restart)
@@ -28,6 +29,7 @@ export function App() {
             <Route path="/session/:id" element={<SessionPage />} />
             <Route path="/new" element={<NewSessionPage />} />
             <Route path="/insult-sword-fight" element={<InsultSwordFightPage />} />
+            <Route path="/multi" element={<MultiSessionPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </WebSocketProvider>
