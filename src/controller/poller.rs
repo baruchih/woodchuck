@@ -242,7 +242,7 @@ async fn poll_session(
     }
 
     // If there was a change, broadcast to subscribers
-    if let Some(change) = change {
+    if let Some(ref change) = change {
         let timestamp = chrono::Utc::now().to_rfc3339();
 
         // Broadcast output if there's new content
@@ -258,7 +258,7 @@ async fn poll_session(
             }
         }
 
-        // Handle status changes separately (notifications should fire even without new content)
+        // Handle status changes: broadcast to WebSocket subscribers
         if change.status_changed {
             info!(
                 session = %session_id,
@@ -278,95 +278,118 @@ async fn poll_session(
                     });
                 }
             }
+        }
+    }
 
-            // Send notifications if waiting, error, or finished working
-            // Deduplicate: only notify if we haven't already sent for this status
-            let should_notify = matches!(change.new_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
-                let mut states = session_states.write().await;
-                if let Some(state) = states.get_mut(session_id) {
-                    if state.last_notified_status == Some(change.new_status) {
-                        false // Already notified for this status
-                    } else {
-                        state.last_notified_status = Some(change.new_status);
+    // ── Push notifications ──
+    // Runs on EVERY poll (not just output changes) so the Resting debounce
+    // can fire after the required stability period even if output is static.
+    //
+    // Dedup: only notify once per status.
+    // Debounce Resting: require status to be stable for 5+ seconds to avoid
+    // false "finished" notifications during brief prompt flashes when user
+    // sends input (quick Resting→Working transition).
+    let current_status = {
+        let states = session_states.read().await;
+        states.get(session_id).map(|s| s.status)
+    };
+
+    if let Some(current_status) = current_status {
+        let should_notify = matches!(current_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
+            let mut states = session_states.write().await;
+            if let Some(state) = states.get_mut(session_id) {
+                if state.last_notified_status == Some(current_status) {
+                    false // Already notified for this status
+                } else if current_status == SessionStatus::Resting {
+                    // Debounce: only notify Resting if stable for 5+ seconds
+                    let stable_enough = state.status_stable_since
+                        .map(|since| (chrono::Utc::now() - since).num_seconds() >= 5)
+                        .unwrap_or(false);
+                    if stable_enough {
+                        state.last_notified_status = Some(current_status);
                         true
+                    } else {
+                        false // Not stable long enough, check again next poll
                     }
                 } else {
-                    false
+                    state.last_notified_status = Some(current_status);
+                    true
                 }
+            } else {
+                false
+            }
+        };
+
+        if should_notify {
+            // Send ntfy notification (with semaphore to limit concurrency)
+            let ntfy = ntfy.clone();
+            let sid = session_id.to_string();
+            let output_snippet = output.clone();
+            let permit = bg_semaphore.clone().try_acquire_owned();
+            if let Ok(permit) = permit {
+                tokio::spawn(async move {
+                    if let Err(e) = ntfy.notify(&sid, &current_status, &output_snippet).await {
+                        warn!(session = %sid, error = %e, "Failed to send ntfy notification");
+                    }
+                    drop(permit);
+                });
+            } else {
+                debug!(session = %session_id, "Skipping ntfy notification - background task limit reached");
+            }
+
+            // Send web push notification
+            info!(session = %session_id, "Sending web push notification");
+
+            // Look up display name from session state (fall back to session_id if empty)
+            let session_name: String = {
+                let states = session_states.read().await;
+                states.get(session_id)
+                    .map(|s| &s.name)
+                    .filter(|n| !n.is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| session_id.to_string())
             };
-            if should_notify {
-                // Send ntfy notification (with semaphore to limit concurrency)
-                let ntfy = ntfy.clone();
-                let sid = session_id.to_string();
-                let status = change.new_status;
-                let output_snippet = output.clone();
-                let permit = bg_semaphore.clone().try_acquire_owned();
-                if let Ok(permit) = permit {
-                    tokio::spawn(async move {
-                        if let Err(e) = ntfy.notify(&sid, &status, &output_snippet).await {
-                            warn!(session = %sid, error = %e, "Failed to send ntfy notification");
+
+            // Send web push notification (with semaphore to limit concurrency)
+            let push = push.clone();
+            let sid = session_id.to_string();
+            let permit = bg_semaphore.clone().try_acquire_owned();
+            if let Ok(permit) = permit {
+                tokio::spawn(async move {
+                    let (title, body) = match current_status {
+                        SessionStatus::NeedsInput => (
+                            format!("{} needs input", session_name),
+                            "Claude is waiting for your response".to_string(),
+                        ),
+                        SessionStatus::Error => (
+                            format!("{} error", session_name),
+                            "An error occurred in the session".to_string(),
+                        ),
+                        SessionStatus::Resting => (
+                            format!("{} finished", session_name),
+                            "Claude has completed the task".to_string(),
+                        ),
+                        _ => {
+                            drop(permit);
+                            return;
                         }
-                        drop(permit);
+                    };
+
+                    let payload = serde_json::json!({
+                        "title": title,
+                        "body": body,
+                        "session_id": sid,
                     });
-                } else {
-                    debug!(session = %sid, "Skipping ntfy notification - background task limit reached");
-                }
 
-                // Send web push notification
-                info!(session = %session_id, "Sending web push notification");
-
-                // Look up display name from session state (fall back to session_id if empty)
-                let session_name: String = {
-                    let states = session_states.read().await;
-                    states.get(session_id)
-                        .map(|s| &s.name)
-                        .filter(|n| !n.is_empty())
-                        .cloned()
-                        .unwrap_or_else(|| session_id.to_string())
-                };
-
-                // Send web push notification (with semaphore to limit concurrency)
-                let push = push.clone();
-                let sid = session_id.to_string();
-                let status = change.new_status;
-                let permit = bg_semaphore.clone().try_acquire_owned();
-                if let Ok(permit) = permit {
-                    tokio::spawn(async move {
-                        let (title, body) = match status {
-                            SessionStatus::NeedsInput => (
-                                format!("{} needs input", session_name),
-                                "Claude is waiting for your response".to_string(),
-                            ),
-                            SessionStatus::Error => (
-                                format!("{} error", session_name),
-                                "An error occurred in the session".to_string(),
-                            ),
-                            SessionStatus::Resting => (
-                                format!("{} finished", session_name),
-                                "Claude has completed the task".to_string(),
-                            ),
-                            _ => {
-                                drop(permit);
-                                return;
-                            }
-                        };
-
-                        let payload = serde_json::json!({
-                            "title": title,
-                            "body": body,
-                            "session_id": sid,
-                        });
-
-                        if let Err(e) = push.send_to_all(&payload.to_string()).await {
-                            warn!(session = %sid, error = %e, "Failed to send web push notification");
-                        } else {
-                            info!(session = %sid, "Web push notification sent");
-                        }
-                        drop(permit);
-                    });
-                } else {
-                    debug!(session = %sid, "Skipping web push notification - background task limit reached");
-                }
+                    if let Err(e) = push.send_to_all(&payload.to_string()).await {
+                        warn!(session = %sid, error = %e, "Failed to send web push notification");
+                    } else {
+                        info!(session = %sid, "Web push notification sent");
+                    }
+                    drop(permit);
+                });
+            } else {
+                debug!(session = %session_id, "Skipping web push notification - background task limit reached");
             }
         }
     }

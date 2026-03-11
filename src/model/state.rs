@@ -53,6 +53,9 @@ pub struct SessionState {
 
     /// Last status for which a push notification was sent (deduplication)
     pub last_notified_status: Option<SessionStatus>,
+
+    /// When the current status was first detected (for notification debounce)
+    pub status_stable_since: Option<DateTime<Utc>>,
 }
 
 impl Default for SessionState {
@@ -70,6 +73,7 @@ impl Default for SessionState {
             tags: Vec::new(),
             is_maintainer: false,
             last_notified_status: None,
+            status_stable_since: None,
         }
     }
 }
@@ -140,6 +144,11 @@ impl SessionState {
         let new_status = super::output::detect_status(new_output);
         let status_changed = new_status != old_status;
         self.status = new_status;
+
+        // Track when this status was first seen (for debounce)
+        if status_changed {
+            self.status_stable_since = Some(Utc::now());
+        }
 
         // Track working_since with proper status transition handling.
         //
