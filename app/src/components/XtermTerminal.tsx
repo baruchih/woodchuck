@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { useXterm } from '../hooks/useXterm';
 
@@ -38,6 +38,8 @@ export function XtermTerminal({
   // ── Selectable text overlay (long-press to activate) ──
   const [selectMode, setSelectMode] = useState(false);
   const [selectableText, setSelectableText] = useState('');
+  const [selectViewportLine, setSelectViewportLine] = useState(0);
+  const selectPreRef = useRef<HTMLPreElement>(null);
 
   // Write content when it changes
   useEffect(() => {
@@ -106,7 +108,9 @@ export function XtermTerminal({
         // Start long-press timer (500ms hold without moving)
         longPressTimer = window.setTimeout(() => {
           if (!touchMoved) {
-            setSelectableText(getTextContent());
+            const { text, viewportLine } = getTextContent();
+            setSelectableText(text);
+            setSelectViewportLine(viewportLine);
             setSelectMode(true);
           }
         }, 500);
@@ -235,6 +239,14 @@ export function XtermTerminal({
     };
   }, [containerRef, onZoomIn, onZoomOut, fontSize, scrollLines, getTextContent]);
 
+  // Scroll the select overlay to match the terminal viewport position
+  useEffect(() => {
+    if (selectMode && selectPreRef.current) {
+      const lineHeight = fontSize * 1.4;
+      selectPreRef.current.scrollTop = selectViewportLine * lineHeight;
+    }
+  }, [selectMode, selectViewportLine, fontSize]);
+
   // Handle click to focus (disabled on mobile where input bar handles input)
   const handleClick = useCallback(() => {
     if (disableKeyboard) return;
@@ -274,6 +286,7 @@ export function XtermTerminal({
             </button>
           </div>
           <pre
+            ref={selectPreRef}
             className="flex-1 overflow-auto p-3 text-text font-mono whitespace-pre select-text"
             style={{ fontSize: `${fontSize}px`, lineHeight: 1.4, userSelect: 'text', WebkitUserSelect: 'text' }}
           >

@@ -18,7 +18,7 @@ interface UseXtermReturn {
   focus: () => void;
   blur: () => void;
   scrollLines: (n: number) => void;
-  getTextContent: () => string;
+  getTextContent: () => { text: string; viewportLine: number };
   dimensions: { cols: number; rows: number } | null;
 }
 
@@ -259,9 +259,9 @@ export function useXterm({
   }, []);
 
   // Get all terminal text content by reading the buffer directly (no side effects)
-  const getTextContent = useCallback((): string => {
+  const getTextContent = useCallback((): { text: string; viewportLine: number } => {
     const terminal = terminalRef.current;
-    if (!terminal) return '';
+    if (!terminal) return { text: '', viewportLine: 0 };
     const buffer = terminal.buffer.active;
     const lines: string[] = [];
     for (let i = 0; i < buffer.length; i++) {
@@ -271,7 +271,7 @@ export function useXterm({
     while (lines.length > 0 && lines[lines.length - 1] === '') {
       lines.pop();
     }
-    return lines.join('\n');
+    return { text: lines.join('\n'), viewportLine: buffer.viewportY };
   }, []);
 
   return {
