@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { XtermTerminal } from './XtermTerminal';
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
@@ -20,6 +20,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleTerminalInput = useCallback((data: string) => {
     if (!focused) return;
@@ -53,6 +54,14 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       handleSend();
     }
   }, [handleSend]);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+  }, [inputText]);
 
   const attentionRing = needsAttention ? 'ring-2 ring-status-needs-input' : '';
   const focusRing = focused ? 'ring-2 ring-primary' : '';
@@ -90,21 +99,22 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       </div>
 
       {/* Compact input bar */}
-      <div className="flex items-center gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
-        <input
-          type="text"
+      <div className="flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
+        <textarea
+          ref={textareaRef}
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={onFocus}
           placeholder={focused ? 'Type here...' : 'Click to focus'}
-          className="flex-1 bg-background border border-border rounded px-2 py-0.5 text-xs text-text placeholder:text-text-muted focus:outline-none focus:border-primary"
+          rows={1}
+          className="flex-1 bg-background border border-border rounded px-2 py-0.5 text-xs text-text placeholder:text-text-muted focus:outline-none focus:border-primary resize-none overflow-hidden"
           autoComplete="off"
         />
         <button
           onClick={handleSend}
           disabled={!inputText.trim() || sending}
-          className="text-[10px] font-medium text-primary disabled:opacity-30 px-1.5 py-0.5"
+          className="text-[10px] font-medium text-primary disabled:opacity-30 px-1.5 py-0.5 mt-0.5"
         >
           Send
         </button>
