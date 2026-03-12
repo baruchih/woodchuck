@@ -109,16 +109,24 @@ export function MultiSessionPage() {
             {availableSessions.length === 0 ? (
               <p className="text-xs text-text-muted p-3">No more sessions available</p>
             ) : (
-              availableSessions.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => addSession(s.id)}
-                  className="w-full text-left px-3 py-2 text-xs text-text hover:bg-surface-alt border-b border-border/50 last:border-0"
-                >
-                  <span className="font-medium">{s.name || s.id}</span>
-                  <span className="text-text-muted ml-2">{s.status}</span>
-                </button>
-              ))
+              availableSessions.map(s => {
+                const folderName = s.folder?.split('/').filter(Boolean).pop();
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => addSession(s.id)}
+                    className="w-full text-left px-3 py-2 text-xs text-text hover:bg-surface-alt border-b border-border/50 last:border-0"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium truncate">{s.name || s.id}</span>
+                      <span className="text-text-muted ml-2 shrink-0">{s.status}</span>
+                    </div>
+                    {folderName && (
+                      <div className="text-[10px] text-text-muted mt-0.5 truncate">{folderName}</div>
+                    )}
+                  </button>
+                );
+              })
             )}
           </div>
         )}
