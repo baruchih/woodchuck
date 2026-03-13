@@ -173,6 +173,27 @@ export const api = {
     return data.data;
   },
 
+  uploadProjectFiles: async (name: string, files: FileList): Promise<{ path: string }> => {
+    const formData = new FormData();
+    formData.append('name', name);
+    for (const file of Array.from(files)) {
+      // Use webkitRelativePath if available (folder upload), otherwise just the name
+      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      formData.append('files', file, relativePath);
+    }
+
+    const res = await fetch(
+      `${BASE_URL}/folders/upload`,
+      { method: 'POST', body: formData }
+    );
+
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Upload failed');
+    }
+    return data.data;
+  },
+
   uploadImage: async (sessionId: string, file: File): Promise<{ path: string }> => {
     const formData = new FormData();
     formData.append('image', file);

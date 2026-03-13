@@ -478,6 +478,167 @@ fn detect_zip_root_dir(archive: &zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Opt
     root.map(std::path::PathBuf::from)
 }
 
+/// Upload individual files into a new project folder.
+///
+/// Each file has a relative path (from the browser's webkitRelativePath or manual naming).
+/// The first path component (the folder name from the browser) is stripped so files
+/// land directly in the project folder.
+///
+/// Returns the full path to the created folder.
+#[instrument(skip(files))]
+pub async fn upload_project_files(
+    config: &Config,
+    name: &str,
+    files: &[(String, Vec<u8>)],
+) -> Result<String> {
+    // Total size check
+    let total_size: usize = files.iter().map(|(_, data)| data.len()).sum();
+    if total_size > MAX_UPLOAD_SIZE {
+        return Err(ModelError::InvalidInput(format!(
+            "Upload too large ({} bytes, max {} bytes)",
+            total_size, MAX_UPLOAD_SIZE
+        )));
+    }
+
+    validate_folder_name(name)?;
+
+    // Find a unique folder name
+    let base_path = Path::new(&config.projects_dir).join(name);
+    let final_path = if base_path.exists() {
+        let mut suffix = 1u32;
+        loop {
+            let candidate = Path::new(&config.projects_dir).join(format!("{}-{}", name, suffix));
+            if !candidate.exists() {
+                break candidate;
+            }
+            suffix += 1;
+            if suffix > 100 {
+                return Err(ModelError::InvalidInput(
+                    "Too many folders with this name".to_string(),
+                ));
+            }
+        }
+    } else {
+        base_path
+    };
+
+    let final_path_str = final_path.to_string_lossy().to_string();
+
+    std::fs::create_dir_all(&final_path).map_err(|e| {
+        ModelError::IoError(format!("Failed to create folder: {}", e))
+    })?;
+
+    // Detect common root prefix (browser sends "folder/sub/file.txt" for webkitdirectory)
+    let strip_prefix = detect_common_prefix(files);
+
+    for (rel_path, data) in files {
+        // Strip the common prefix (usually the folder name from browser)
+        let cleaned = if let Some(ref prefix) = strip_prefix {
+            let p = Path::new(rel_path);
+            match p.strip_prefix(prefix) {
+                Ok(stripped) => stripped.to_owned(),
+                Err(_) => std::path::PathBuf::from(rel_path),
+            }
+        } else {
+            std::path::PathBuf::from(rel_path)
+        };
+
+        // Skip empty paths
+        if cleaned.as_os_str().is_empty() {
+            continue;
+        }
+
+        let out_path = final_path.join(&cleaned);
+
+        // Security: ensure within target directory
+        if !out_path.starts_with(&final_path) {
+            continue;
+        }
+
+        // Skip hidden files and directories
+        if cleaned.components().any(|c| {
+            c.as_os_str().to_str().map(|s| s.starts_with('.')).unwrap_or(false)
+        }) {
+            continue;
+        }
+
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                ModelError::IoError(format!("Failed to create directory: {}", e))
+            })?;
+        }
+
+        std::fs::write(&out_path, data).map_err(|e| {
+            ModelError::IoError(format!("Failed to write file: {}", e))
+        })?;
+    }
+
+    // Create CLAUDE.md
+    let folder_name = final_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(name);
+    let claude_md = format!(
+        "# {}\n\nUploaded on {}.\n",
+        folder_name,
+        chrono::Utc::now().format("%Y-%m-%d"),
+    );
+    let claude_md_path = final_path.join("CLAUDE.md");
+    if !claude_md_path.exists() {
+        let _ = std::fs::write(&claude_md_path, &claude_md);
+    }
+
+    // Git init + initial commit
+    let git_result = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&final_path)
+        .output();
+
+    if let Ok(output) = git_result {
+        if output.status.success() {
+            let _ = std::process::Command::new("git")
+                .args(["add", "."])
+                .current_dir(&final_path)
+                .output();
+            let _ = std::process::Command::new("git")
+                .args(["commit", "-m", "Initial upload"])
+                .current_dir(&final_path)
+                .output();
+            info!(path = %final_path_str, "Initialized git repo with initial commit");
+        }
+    }
+
+    info!(path = %final_path_str, file_count = files.len(), total_size, "Uploaded project files");
+    Ok(final_path_str)
+}
+
+/// Detect a common first path component across all file paths.
+///
+/// When using webkitdirectory, browsers prefix all paths with the selected folder name.
+/// E.g., ["my-folder/src/main.rs", "my-folder/Cargo.toml"] → prefix = "my-folder"
+fn detect_common_prefix(files: &[(String, Vec<u8>)]) -> Option<std::path::PathBuf> {
+    if files.is_empty() {
+        return None;
+    }
+
+    let mut root: Option<&str> = None;
+    for (path, _) in files {
+        let parts: Vec<&str> = path.split('/').collect();
+        if parts.len() < 2 {
+            // File has no directory prefix — no common root
+            return None;
+        }
+        let first = parts[0];
+        match root {
+            None => root = Some(first),
+            Some(r) if r != first => return None,
+            _ => {}
+        }
+    }
+
+    root.map(std::path::PathBuf::from)
+}
+
 // =============================================================================
 // Unit Tests
 // =============================================================================

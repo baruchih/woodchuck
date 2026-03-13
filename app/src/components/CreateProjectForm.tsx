@@ -12,10 +12,24 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
   const [mode, setMode] = useState<'create' | 'clone' | 'upload'>('create');
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<FileList | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Summarize selected files for display
+  const fileSummary = files
+    ? files.length === 1
+      ? files[0].name
+      : `${files.length} files`
+    : null;
+  const totalSize = files
+    ? Array.from(files).reduce((sum, f) => sum + f.size, 0)
+    : 0;
+
+  const isZip = files?.length === 1 && /\.zip$/i.test(files[0].name);
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,18 +37,25 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
 
     if (mode === 'upload') {
       if (!name.trim()) {
-        setError('Please enter a folder name');
+        setError('Please enter a project name');
         return;
       }
-      if (!file) {
-        setError('Please select a zip file');
+      if (!files || files.length === 0) {
+        setError('Please select files to upload');
         return;
       }
 
       setSubmitting(true);
       try {
-        const data = await api.uploadProject(name.trim(), file);
-        onSuccess(data.path);
+        if (isZip) {
+          // Single zip — use zip upload path
+          const data = await api.uploadProject(name.trim(), files[0]);
+          onSuccess(data.path);
+        } else {
+          // Multiple files — use files upload path
+          const data = await api.uploadProjectFiles(name.trim(), files);
+          onSuccess(data.path);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Upload failed';
         setError(message);
@@ -73,26 +94,36 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
     } finally {
       setSubmitting(false);
     }
-  }, [mode, name, url, file, onSuccess]);
+  }, [mode, name, url, files, isZip, onSuccess]);
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files?.[0] ?? null;
-    setFile(selected);
-    // Auto-fill name from filename if empty
-    if (selected && !name.trim()) {
-      const baseName = selected.name.replace(/\.zip$/i, '');
-      setName(baseName);
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    if (!selected || selected.length === 0) return;
+    setFiles(selected);
+    // Auto-fill name if empty
+    if (!name.trim()) {
+      if (selected.length === 1) {
+        setName(selected[0].name.replace(/\.zip$/i, ''));
+      } else {
+        // For webkitdirectory, the first path component is the folder name
+        const firstPath = (selected[0] as File & { webkitRelativePath?: string }).webkitRelativePath;
+        if (firstPath) {
+          const folderName = firstPath.split('/')[0];
+          if (folderName) setName(folderName);
+        }
+      }
     }
   }, [name]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    const dropped = e.dataTransfer.files[0];
-    if (dropped) {
-      setFile(dropped);
+    const dropped = e.dataTransfer.files;
+    if (dropped.length > 0) {
+      setFiles(dropped);
       if (!name.trim()) {
-        const baseName = dropped.name.replace(/\.zip$/i, '');
-        setName(baseName);
+        if (dropped.length === 1) {
+          setName(dropped[0].name.replace(/\.zip$/i, ''));
+        }
       }
     }
   }, [name]);
@@ -103,7 +134,7 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
   const isSubmitDisabled = submitting
     || (mode === 'create' && !name.trim())
     || (mode === 'clone' && !url.trim())
-    || (mode === 'upload' && (!name.trim() || !file));
+    || (mode === 'upload' && (!name.trim() || !files || files.length === 0));
 
   return (
     <div className="border border-border rounded-sm p-4 space-y-4 bg-surface-alt">
@@ -134,7 +165,7 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
           onClick={() => { setMode('upload'); setError(null); }}
           disabled={submitting}
         >
-          Upload Zip
+          Upload Files
         </Button>
       </div>
 
@@ -165,34 +196,73 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
 
         {mode === 'upload' && (
           <div>
-            <label className={labelStyles}>Zip File</label>
+            <label className={labelStyles}>Files</label>
+            {/* Hidden file inputs */}
             <input
-              ref={fileInputRef}
+              ref={zipInputRef}
               type="file"
               accept=".zip,application/zip"
-              onChange={handleFileChange}
+              onChange={handleFileSelect}
+              disabled={submitting}
+              className="hidden"
+            />
+            <input
+              ref={filesInputRef}
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              disabled={submitting}
+              className="hidden"
+            />
+            <input
+              ref={folderInputRef}
+              type="file"
+              /* @ts-expect-error webkitdirectory is non-standard */
+              webkitdirectory=""
+              onChange={handleFileSelect}
               disabled={submitting}
               className="hidden"
             />
             <div
-              onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDrop}
-              className="w-full border-2 border-dashed border-border rounded-sm p-6 text-center cursor-pointer hover:border-primary transition-colors"
+              className="w-full border-2 border-dashed border-border rounded-sm p-4 text-center cursor-pointer hover:border-primary transition-colors space-y-3"
             >
-              {file ? (
+              {fileSummary ? (
                 <div>
-                  <p className="text-text text-sm font-medium">{file.name}</p>
+                  <p className="text-text text-sm font-medium">{fileSummary}</p>
                   <p className="text-text-muted text-xs mt-1">
-                    {(file.size / 1024 / 1024).toFixed(1)} MB
+                    {(totalSize / 1024 / 1024).toFixed(1)} MB
+                    {isZip && ' (zip)'}
                   </p>
                 </div>
               ) : (
-                <div>
-                  <p className="text-text-muted text-sm">Drop a .zip file here or click to browse</p>
-                  <p className="text-text-muted text-xs mt-1">Max 100 MB</p>
-                </div>
+                <p className="text-text-muted text-sm">Drop files here, or choose below</p>
               )}
+              <div className="flex gap-2 justify-center flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => zipInputRef.current?.click()}
+                  className="text-xs text-primary px-2 py-1 border border-primary/30 rounded hover:bg-primary/10"
+                >
+                  Zip file
+                </button>
+                <button
+                  type="button"
+                  onClick={() => filesInputRef.current?.click()}
+                  className="text-xs text-primary px-2 py-1 border border-primary/30 rounded hover:bg-primary/10"
+                >
+                  Select files
+                </button>
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  className="text-xs text-primary px-2 py-1 border border-primary/30 rounded hover:bg-primary/10"
+                >
+                  Select folder
+                </button>
+              </div>
+              <p className="text-text-muted text-[10px]">Max 100 MB</p>
             </div>
           </div>
         )}

@@ -395,14 +395,20 @@ pub async fn create_folder_handler(
     ))
 }
 
-/// POST /folders/upload - Upload a zip file as a new project folder
+/// POST /folders/upload - Upload files as a new project folder
+///
+/// Supports two modes:
+/// - **Zip mode**: fields `name` + single `file` (zip is extracted)
+/// - **Files mode**: field `name` + multiple `files` fields, each with
+///   `webkitRelativePath` in a `paths` field (written preserving directory structure)
 #[instrument(skip(state, multipart))]
 pub async fn upload_project_handler(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> ApiResultCreated<UploadProjectData> {
     let mut name: Option<String> = None;
-    let mut file_data: Option<Vec<u8>> = None;
+    let mut zip_data: Option<Vec<u8>> = None;
+    let mut loose_files: Vec<(String, Vec<u8>)> = Vec::new();
 
     // Extract fields from multipart
     while let Some(field) = multipart
@@ -422,7 +428,17 @@ pub async fn upload_project_handler(
                 let bytes = field.bytes().await.map_err(|e| {
                     err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read file: {}", e), "INVALID_INPUT")
                 })?;
-                file_data = Some(bytes.to_vec());
+                zip_data = Some(bytes.to_vec());
+            }
+            "files" => {
+                // Get the relative path from the filename (browsers set this for webkitdirectory)
+                let file_path = field.file_name().unwrap_or("").to_string();
+                let bytes = field.bytes().await.map_err(|e| {
+                    err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read file: {}", e), "INVALID_INPUT")
+                })?;
+                if !file_path.is_empty() {
+                    loose_files.push((file_path, bytes.to_vec()));
+                }
             }
             _ => {} // ignore unknown fields
         }
@@ -432,12 +448,18 @@ pub async fn upload_project_handler(
         .filter(|n| !n.trim().is_empty())
         .map(|n| n.trim().to_string())
         .ok_or_else(|| err_msg(StatusCode::BAD_REQUEST, "Missing 'name' field", "INVALID_INPUT"))?;
-    let data = file_data
-        .ok_or_else(|| err_msg(StatusCode::BAD_REQUEST, "Missing 'file' field", "INVALID_INPUT"))?;
 
-    let path = crate::model::upload_project(&state.config, &name, &data)
-        .await
-        .map_err(err)?;
+    let path = if !loose_files.is_empty() {
+        crate::model::upload_project_files(&state.config, &name, &loose_files)
+            .await
+            .map_err(err)?
+    } else if let Some(data) = zip_data {
+        crate::model::upload_project(&state.config, &name, &data)
+            .await
+            .map_err(err)?
+    } else {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "No files uploaded", "INVALID_INPUT"));
+    };
 
     info!(path = %path, "Uploaded project");
     Ok((
