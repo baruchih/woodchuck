@@ -342,6 +342,12 @@ pub struct UploadedImageData {
     pub path: String,
 }
 
+/// Upload project response
+#[derive(Debug, Serialize)]
+pub struct UploadProjectData {
+    pub path: String,
+}
+
 // =============================================================================
 // IntoResponse Implementation
 // =============================================================================

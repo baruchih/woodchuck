@@ -277,6 +277,208 @@ pub async fn create_folder(
 }
 
 // =============================================================================
+// Upload Project
+// =============================================================================
+
+/// Maximum upload size: 100 MB
+const MAX_UPLOAD_SIZE: usize = 100 * 1024 * 1024;
+
+/// Upload a zip file and extract it into a new project folder.
+///
+/// Steps:
+/// 1. Validate folder name
+/// 2. Create folder (with -N suffix if name already exists)
+/// 3. Extract zip contents
+/// 4. Create CLAUDE.md
+/// 5. Run `git init` + initial commit
+///
+/// Returns the full path to the created folder.
+#[instrument(skip(data))]
+pub async fn upload_project(
+    config: &Config,
+    name: &str,
+    data: &[u8],
+) -> Result<String> {
+    if data.len() > MAX_UPLOAD_SIZE {
+        return Err(ModelError::InvalidInput(format!(
+            "Upload too large ({} bytes, max {} bytes)",
+            data.len(),
+            MAX_UPLOAD_SIZE
+        )));
+    }
+
+    validate_folder_name(name)?;
+
+    // Find a unique folder name (add -1, -2, etc. if exists)
+    let base_path = Path::new(&config.projects_dir).join(name);
+    let final_path = if base_path.exists() {
+        let mut suffix = 1u32;
+        loop {
+            let candidate = Path::new(&config.projects_dir).join(format!("{}-{}", name, suffix));
+            if !candidate.exists() {
+                break candidate;
+            }
+            suffix += 1;
+            if suffix > 100 {
+                return Err(ModelError::InvalidInput(
+                    "Too many folders with this name".to_string(),
+                ));
+            }
+        }
+    } else {
+        base_path
+    };
+
+    let final_path_str = final_path.to_string_lossy().to_string();
+
+    std::fs::create_dir_all(&final_path).map_err(|e| {
+        ModelError::IoError(format!("Failed to create folder: {}", e))
+    })?;
+
+    // Extract zip
+    let cursor = std::io::Cursor::new(data);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+        // Clean up on failure
+        let _ = std::fs::remove_dir_all(&final_path);
+        ModelError::InvalidInput(format!("Invalid zip file: {}", e))
+    })?;
+
+    // Detect if zip has a single root directory (common with GitHub downloads)
+    let strip_prefix = detect_zip_root_dir(&archive);
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).map_err(|e| {
+            ModelError::IoError(format!("Failed to read zip entry: {}", e))
+        })?;
+
+        let raw_name = match file.enclosed_name() {
+            Some(p) => p.to_owned(),
+            None => continue, // Skip entries with unsafe paths
+        };
+
+        // Strip the common root directory prefix if detected
+        let relative = if let Some(ref prefix) = strip_prefix {
+            match raw_name.strip_prefix(prefix) {
+                Ok(stripped) => stripped.to_owned(),
+                Err(_) => continue,
+            }
+        } else {
+            raw_name
+        };
+
+        // Skip empty path (the root dir itself after stripping)
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+
+        let out_path = final_path.join(&relative);
+
+        // Security: ensure the output path is within the target directory
+        if !out_path.starts_with(&final_path) {
+            continue; // Skip path traversal attempts
+        }
+
+        if file.is_dir() {
+            std::fs::create_dir_all(&out_path).map_err(|e| {
+                ModelError::IoError(format!("Failed to create directory: {}", e))
+            })?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    ModelError::IoError(format!("Failed to create parent dir: {}", e))
+                })?;
+            }
+            let mut outfile = std::fs::File::create(&out_path).map_err(|e| {
+                ModelError::IoError(format!("Failed to create file: {}", e))
+            })?;
+            std::io::copy(&mut file, &mut outfile).map_err(|e| {
+                ModelError::IoError(format!("Failed to write file: {}", e))
+            })?;
+
+            // Preserve executable permission on Unix
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Some(mode) = file.unix_mode() {
+                    let _ = std::fs::set_permissions(&out_path, std::fs::Permissions::from_mode(mode));
+                }
+            }
+        }
+    }
+
+    // Create CLAUDE.md
+    let folder_name = final_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(name);
+    let claude_md = format!(
+        "# {}\n\nUploaded on {}.\n",
+        folder_name,
+        chrono::Utc::now().format("%Y-%m-%d"),
+    );
+    let claude_md_path = final_path.join("CLAUDE.md");
+    if !claude_md_path.exists() {
+        let _ = std::fs::write(&claude_md_path, &claude_md);
+    }
+
+    // Git init + initial commit
+    let git_result = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&final_path)
+        .output();
+
+    if let Ok(output) = git_result {
+        if output.status.success() {
+            // git add + commit
+            let _ = std::process::Command::new("git")
+                .args(["add", "."])
+                .current_dir(&final_path)
+                .output();
+            let _ = std::process::Command::new("git")
+                .args(["commit", "-m", "Initial upload"])
+                .current_dir(&final_path)
+                .output();
+            info!(path = %final_path_str, "Initialized git repo with initial commit");
+        }
+    }
+
+    info!(path = %final_path_str, size = data.len(), entries = archive.len(), "Uploaded project");
+    Ok(final_path_str)
+}
+
+/// Detect if all entries in a zip share a common root directory.
+///
+/// GitHub zip downloads typically wrap everything in `repo-main/` — we strip that
+/// so files end up directly in the project folder.
+fn detect_zip_root_dir(archive: &zip::ZipArchive<std::io::Cursor<&[u8]>>) -> Option<std::path::PathBuf> {
+    if archive.len() == 0 {
+        return None;
+    }
+
+    let mut root: Option<String> = None;
+    for i in 0..archive.len() {
+        let name = match archive.name_for_index(i) {
+            Some(n) => n,
+            None => return None,
+        };
+        // Get the first path component
+        let first = match name.split('/').next() {
+            Some(f) if !f.is_empty() => f,
+            _ => return None,
+        };
+        match &root {
+            None => root = Some(first.to_string()),
+            Some(r) if r != first => return None,
+            _ => {}
+        }
+    }
+
+    // Only strip if there's a common root and it looks like a directory
+    // (i.e., at least one entry is just the root dir itself or all entries are under it)
+    root.map(std::path::PathBuf::from)
+}
+
+// =============================================================================
 // Unit Tests
 // =============================================================================
 

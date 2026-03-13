@@ -59,6 +59,9 @@ url = "2"
 dirs = "5"
 filetime = "0.2.27"
 
+# Zip extraction
+zip = "2"
+
 [dev-dependencies]
 tempfile = "3"
 tokio-test = "0.4"

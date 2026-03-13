@@ -16,7 +16,7 @@ use super::response::{
     MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData, SessionCreatedData,
     SessionData, SessionKilledData, SessionUpdatedData, SessionsData, TemplateData,
-    TemplateDeletedData, TemplatesListData, UploadedImageData, VapidKeyData,
+    TemplateDeletedData, TemplatesListData, UploadProjectData, UploadedImageData, VapidKeyData,
 };
 use super::state::AppState;
 
@@ -392,6 +392,57 @@ pub async fn create_folder_handler(
     Ok((
         StatusCode::CREATED,
         ApiResponse::ok(FolderCreatedData { path }),
+    ))
+}
+
+/// POST /folders/upload - Upload a zip file as a new project folder
+#[instrument(skip(state, multipart))]
+pub async fn upload_project_handler(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> ApiResultCreated<UploadProjectData> {
+    let mut name: Option<String> = None;
+    let mut file_data: Option<Vec<u8>> = None;
+
+    // Extract fields from multipart
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| err_msg(StatusCode::BAD_REQUEST, &format!("Invalid multipart: {}", e), "INVALID_INPUT"))?
+    {
+        let field_name = field.name().unwrap_or("").to_string();
+        match field_name.as_str() {
+            "name" => {
+                let val = field.text().await.map_err(|e| {
+                    err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read name: {}", e), "INVALID_INPUT")
+                })?;
+                name = Some(val);
+            }
+            "file" => {
+                let bytes = field.bytes().await.map_err(|e| {
+                    err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read file: {}", e), "INVALID_INPUT")
+                })?;
+                file_data = Some(bytes.to_vec());
+            }
+            _ => {} // ignore unknown fields
+        }
+    }
+
+    let name = name
+        .filter(|n| !n.trim().is_empty())
+        .map(|n| n.trim().to_string())
+        .ok_or_else(|| err_msg(StatusCode::BAD_REQUEST, "Missing 'name' field", "INVALID_INPUT"))?;
+    let data = file_data
+        .ok_or_else(|| err_msg(StatusCode::BAD_REQUEST, "Missing 'file' field", "INVALID_INPUT"))?;
+
+    let path = crate::model::upload_project(&state.config, &name, &data)
+        .await
+        .map_err(err)?;
+
+    info!(path = %path, "Uploaded project");
+    Ok((
+        StatusCode::CREATED,
+        ApiResponse::ok(UploadProjectData { path }),
     ))
 }
 
