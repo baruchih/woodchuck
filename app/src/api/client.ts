@@ -30,6 +30,7 @@ function uploadWithProgress<T>(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
+    xhr.timeout = 5 * 60 * 1000; // 5 minute timeout
 
     if (onProgress) {
       xhr.upload.onprogress = (e) => {
@@ -40,6 +41,14 @@ function uploadWithProgress<T>(
     }
 
     xhr.onload = () => {
+      if (xhr.status === 0 || xhr.status >= 500) {
+        reject(new Error(`Server error (${xhr.status})`));
+        return;
+      }
+      if (xhr.status === 413) {
+        reject(new Error('File too large'));
+        return;
+      }
       try {
         const data = JSON.parse(xhr.responseText);
         if (!data.success) {
@@ -48,12 +57,13 @@ function uploadWithProgress<T>(
           resolve(data.data);
         }
       } catch {
-        reject(new Error('Invalid server response'));
+        reject(new Error(`Upload failed (${xhr.status})`));
       }
     };
 
-    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.onerror = () => reject(new Error('Network error during upload'));
     xhr.onabort = () => reject(new Error('Upload aborted'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out'));
 
     xhr.send(formData);
   });

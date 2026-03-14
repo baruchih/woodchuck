@@ -3,7 +3,7 @@
 //! Builds the Axum router with all API routes.
 
 use axum::{
-    extract::{State, WebSocketUpgrade},
+    extract::{DefaultBodyLimit, State, WebSocketUpgrade},
     middleware,
     response::IntoResponse,
     routing::{delete, get, patch, post},
@@ -49,7 +49,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/maintainer/status", get(maintainer_status_handler))
         .route("/deploy/status", get(deploy_status_handler));
 
-    // Write routes (rate limited)
+    // Upload routes — higher body limit (100 MB), rate limited
+    let upload_routes = Router::new()
+        .route("/sessions/:id/upload", post(upload_image_handler))
+        .route("/sessions/:id/upload-files", post(upload_files_handler))
+        .route("/folders/upload", post(upload_project_handler))
+        .route_layer(DefaultBodyLimit::max(100 * 1024 * 1024))
+        .route_layer(middleware::from_fn_with_state(write_limiter.clone(), rate_limit_middleware));
+
+    // Write routes (rate limited, default body limit)
     let write_routes = Router::new()
         .route("/sessions", post(create_session_handler))
         .route("/sessions/:id", delete(delete_session_handler))
@@ -57,10 +65,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/:id/input", post(send_input_handler))
         .route("/sessions/:id/resize", post(resize_handler))
         .route("/sessions/:id/hook", post(hook_handler))
-        .route("/sessions/:id/upload", post(upload_image_handler))
-        .route("/sessions/:id/upload-files", post(upload_files_handler))
         .route("/folders", post(create_folder_handler))
-        .route("/folders/upload", post(upload_project_handler))
         .route("/projects", post(create_project_handler))
         .route("/projects/:id", patch(rename_project_handler))
         .route("/projects/:id", delete(delete_project_handler))
@@ -78,6 +83,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let api_router = Router::new()
         .merge(read_routes)
+        .merge(upload_routes)
         .merge(write_routes);
 
     // Combine with state and middleware — includes WebSocket on same port
