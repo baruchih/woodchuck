@@ -5,6 +5,7 @@ interface MobileInputBarProps {
   onSendKey: (key: string) => void;
   onUploadImage: () => void;
   onUploadFiles: () => void;
+  onBrowseFiles: () => void;
   onKillSession: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -16,6 +17,7 @@ export function MobileInputBar({
   onSendKey,
   onUploadImage,
   onUploadFiles,
+  onBrowseFiles,
   onKillSession,
   onZoomIn,
   onZoomOut,
@@ -49,7 +51,8 @@ export function MobileInputBar({
         <ActionButton label="Tab" onClick={() => onSendKey('Tab')} />
         <ActionButton label="A+" onClick={onZoomIn} />
         <ActionButton label="A-" onClick={onZoomOut} />
-<ActionButton label="Kill" onClick={onKillSession} variant="danger" />
+        <ActionButton label="Dir" onClick={onBrowseFiles} />
+        <ActionButton label="Kill" onClick={onKillSession} variant="danger" />
       </div>
 
       {/* Text input row */}

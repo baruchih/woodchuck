@@ -354,6 +354,25 @@ pub struct UploadedFilesData {
     pub paths: Vec<String>,
 }
 
+/// File entry in a directory listing
+#[derive(Debug, Serialize)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub children: Option<Vec<FileEntry>>,
+}
+
+/// Session files listing response
+#[derive(Debug, Serialize)]
+pub struct SessionFilesData {
+    pub root: String,
+    pub files: Vec<FileEntry>,
+}
+
 // =============================================================================
 // IntoResponse Implementation
 // =============================================================================

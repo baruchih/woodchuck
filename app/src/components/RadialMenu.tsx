@@ -13,6 +13,7 @@ interface RadialMenuProps {
   onZoomOut?: () => void;
   onUploadImage?: () => void;
   onUploadFiles?: () => void;
+  onBrowseFiles?: () => void;
 }
 
 interface KeyItem {
@@ -35,6 +36,7 @@ const ZOOM_ITEMS: KeyItem[] = [
   { label: 'A-', key: '__zoom_out__', variant: 'ghost' },
   { label: 'IMG', key: '__upload__', variant: 'ghost' },
   { label: 'FILE', key: '__upload_files__', variant: 'ghost' },
+  { label: 'DIR', key: '__browse_files__', variant: 'ghost' },
 ];
 
 const INNER_RADIUS = 65;
@@ -80,6 +82,7 @@ export function RadialMenu({
   onZoomOut,
   onUploadImage,
   onUploadFiles,
+  onBrowseFiles,
 }: RadialMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -121,11 +124,14 @@ export function RadialMenu({
       } else if (key === '__upload_files__') {
         onClose();
         onUploadFiles?.();
+      } else if (key === '__browse_files__') {
+        onClose();
+        onBrowseFiles?.();
       } else {
         onSendKey(key);
       }
     },
-    [onSendKey, onKillSession, onClose, onZoomIn, onZoomOut, onUploadImage, onUploadFiles],
+    [onSendKey, onKillSession, onClose, onZoomIn, onZoomOut, onUploadImage, onUploadFiles, onBrowseFiles],
   );
 
   if (!open) return null;

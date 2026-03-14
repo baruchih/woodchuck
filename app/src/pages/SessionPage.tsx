@@ -11,6 +11,7 @@ import { SessionInfoSheet } from '../components/SessionInfoSheet';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { MobileInputBar } from '../components/MobileInputBar';
 import { UploadStatus, useUploadStatus } from '../components/UploadStatus';
+import { FileBrowser } from '../components/FileBrowser';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
 import { useTerminal } from '../hooks/useTerminal';
@@ -30,6 +31,7 @@ export function SessionPage() {
   const [inputBuffer, setInputBuffer] = useState('');
   const [showKillConfirm, setShowKillConfirm] = useState(false);
   const [showInfoSheet, setShowInfoSheet] = useState(false);
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -441,6 +443,7 @@ export function SessionPage() {
             onSendKey={handleSendKey}
             onUploadImage={handleUploadImage}
             onUploadFiles={handleUploadFiles}
+            onBrowseFiles={() => setShowFileBrowser(true)}
             onKillSession={() => setShowKillConfirm(true)}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
@@ -529,6 +532,15 @@ export function SessionPage() {
           onZoomOut={zoomOut}
           onUploadImage={handleUploadImage}
           onUploadFiles={handleUploadFiles}
+          onBrowseFiles={() => setShowFileBrowser(true)}
+        />
+      )}
+
+      {/* File Browser */}
+      {showFileBrowser && (
+        <FileBrowser
+          sessionId={decodedId}
+          onClose={() => setShowFileBrowser(false)}
         />
       )}
 

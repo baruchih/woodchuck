@@ -1,4 +1,4 @@
-import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult } from '../types';
+import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult, SessionFilesData } from '../types';
 
 const BASE_URL = '/api';
 
@@ -66,6 +66,9 @@ export const api = {
 
   poll: (id: string): Promise<PollData> =>
     request(`/sessions/${encodeURIComponent(id)}/poll`),
+
+  getSessionFiles: (id: string): Promise<SessionFilesData> =>
+    request(`/sessions/${encodeURIComponent(id)}/files`),
 
   resize: (id: string, params: ResizeParams): Promise<void> =>
     request(`/sessions/${encodeURIComponent(id)}/resize`, {

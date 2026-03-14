@@ -12,10 +12,10 @@ use tracing::{debug, info, instrument, warn};
 
 use super::response::{
     err, err_msg, ApiResponse, CommandsData, DeployAbortData, DeployStatusData, DeployTriggerData,
-    FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData, InputSentData,
+    FileEntry, FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData, InputSentData,
     MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData, SessionCreatedData,
-    SessionData, SessionKilledData, SessionUpdatedData, SessionsData, TemplateData,
+    SessionData, SessionFilesData, SessionKilledData, SessionUpdatedData, SessionsData, TemplateData,
     TemplateDeletedData, TemplatesListData, UploadProjectData, UploadedFilesData, UploadedImageData, VapidKeyData,
 };
 use super::state::AppState;
@@ -1155,6 +1155,106 @@ pub async fn upload_files_handler(
         StatusCode::CREATED,
         ApiResponse::ok(UploadedFilesData { paths }),
     ))
+}
+
+/// GET /sessions/:id/files - List files in the session's project folder
+///
+/// Returns a recursive tree of files and directories (max depth 4, skips hidden dirs).
+#[instrument(skip(state))]
+pub async fn session_files_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> ApiResult<SessionFilesData> {
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+
+    let root = std::path::PathBuf::from(&session.folder);
+    if !root.is_dir() {
+        return Err(err_msg(
+            StatusCode::NOT_FOUND,
+            "Session folder not found",
+            "FOLDER_NOT_FOUND",
+        ));
+    }
+
+    let files = list_dir_recursive(&root, &root, 0, 4).await;
+
+    debug!(session = %session_id, count = files.len(), "Listed session files");
+    Ok(ApiResponse::ok(SessionFilesData {
+        root: session.folder,
+        files,
+    }))
+}
+
+/// Recursively list directory contents up to max_depth
+async fn list_dir_recursive(
+    base: &std::path::Path,
+    dir: &std::path::Path,
+    depth: u32,
+    max_depth: u32,
+) -> Vec<FileEntry> {
+    let mut entries = Vec::new();
+
+    let mut read_dir = match tokio::fs::read_dir(dir).await {
+        Ok(rd) => rd,
+        Err(_) => return entries,
+    };
+
+    let mut raw_entries = Vec::new();
+    while let Ok(Some(entry)) = read_dir.next_entry().await {
+        raw_entries.push(entry);
+    }
+
+    // Sort by name
+    raw_entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    for entry in raw_entries {
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden files/dirs
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let path = entry.path();
+        let relative = path
+            .strip_prefix(base)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        let metadata = match entry.metadata().await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        if metadata.is_dir() {
+            let children = if depth < max_depth {
+                Some(Box::pin(list_dir_recursive(base, &path, depth + 1, max_depth)).await)
+            } else {
+                None
+            };
+
+            entries.push(FileEntry {
+                name,
+                path: relative,
+                is_dir: true,
+                size: None,
+                children,
+            });
+        } else {
+            entries.push(FileEntry {
+                name,
+                path: relative,
+                is_dir: false,
+                size: Some(metadata.len()),
+                children: None,
+            });
+        }
+    }
+
+    entries
 }
 
 /// DELETE /projects/:id - Delete a project (sessions become ungrouped)

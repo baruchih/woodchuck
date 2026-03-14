@@ -22,8 +22,8 @@ use super::handlers::{
     list_sessions_handler, list_templates_handler, maintainer_inbox_handler,
     maintainer_pause_handler, maintainer_resume_handler, maintainer_status_handler,
     poll_handler, push_subscribe_handler, push_unsubscribe_handler, rename_project_handler,
-    resize_handler, send_input_handler, update_session_handler, upload_files_handler,
-    upload_image_handler, upload_project_handler, vapid_key_handler,
+    resize_handler, send_input_handler, session_files_handler, update_session_handler,
+    upload_files_handler, upload_image_handler, upload_project_handler, vapid_key_handler,
 };
 use super::rate_limit::{RateLimiter, rate_limit_middleware};
 use super::state::AppState;
@@ -40,6 +40,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions", get(list_sessions_handler))
         .route("/sessions/:id", get(get_session_handler))
         .route("/sessions/:id/poll", get(poll_handler))
+        .route("/sessions/:id/files", get(session_files_handler))
         .route("/folders", get(list_folders_handler))
         .route("/projects", get(list_projects_handler))
         .route("/templates", get(list_templates_handler))

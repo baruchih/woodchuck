@@ -184,6 +184,20 @@ export interface Command {
   has_args: boolean;
 }
 
+// File browser types
+export interface FileEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size?: number;
+  children?: FileEntry[];
+}
+
+export interface SessionFilesData {
+  root: string;
+  files: FileEntry[];
+}
+
 export interface PushSubscriptionKeys {
   p256dh: string;
   auth: string;
