@@ -19,6 +19,46 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return data.data;
 }
 
+export type ProgressCallback = (progress: number) => void;
+
+/** Upload FormData via XHR with progress tracking. Returns parsed response data. */
+function uploadWithProgress<T>(
+  url: string,
+  formData: FormData,
+  onProgress?: ProgressCallback,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (!data.success) {
+          reject(new Error(data.error || 'Upload failed'));
+        } else {
+          resolve(data.data);
+        }
+      } catch {
+        reject(new Error('Invalid server response'));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Upload failed'));
+    xhr.onabort = () => reject(new Error('Upload aborted'));
+
+    xhr.send(formData);
+  });
+}
+
 export const api = {
   getSessions: (): Promise<{ sessions: Session[] }> =>
     request('/sessions'),
@@ -159,76 +199,43 @@ export const api = {
   rollbackDeploy: (): Promise<DeployTriggerResult> =>
     request('/deploy/rollback', { method: 'POST' }),
 
-  uploadProject: async (name: string, file: File): Promise<{ path: string }> => {
+  uploadProject: (name: string, file: File, onProgress?: ProgressCallback): Promise<{ path: string }> => {
     const formData = new FormData();
     formData.append('name', name);
     formData.append('file', file);
-
-    const res = await fetch(
-      `${BASE_URL}/folders/upload`,
-      { method: 'POST', body: formData }
-    );
-
-    const data = await res.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Upload failed');
-    }
-    return data.data;
+    return uploadWithProgress(`${BASE_URL}/folders/upload`, formData, onProgress);
   },
 
-  uploadProjectFiles: async (name: string, files: FileList): Promise<{ path: string }> => {
+  uploadProjectFiles: (name: string, files: FileList, onProgress?: ProgressCallback): Promise<{ path: string }> => {
     const formData = new FormData();
     formData.append('name', name);
     for (const file of Array.from(files)) {
-      // Use webkitRelativePath if available (folder upload), otherwise just the name
       const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
       formData.append('files', file, relativePath);
     }
-
-    const res = await fetch(
-      `${BASE_URL}/folders/upload`,
-      { method: 'POST', body: formData }
-    );
-
-    const data = await res.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Upload failed');
-    }
-    return data.data;
+    return uploadWithProgress(`${BASE_URL}/folders/upload`, formData, onProgress);
   },
 
-  uploadFiles: async (sessionId: string, files: FileList): Promise<{ paths: string[] }> => {
+  uploadFiles: (sessionId: string, files: FileList, onProgress?: ProgressCallback): Promise<{ paths: string[] }> => {
     const formData = new FormData();
     for (const file of Array.from(files)) {
       formData.append('files', file, file.name);
     }
-
-    const res = await fetch(
+    return uploadWithProgress(
       `${BASE_URL}/sessions/${encodeURIComponent(sessionId)}/upload-files`,
-      { method: 'POST', body: formData }
+      formData,
+      onProgress,
     );
-
-    const data = await res.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Upload failed');
-    }
-    return data.data;
   },
 
-  uploadImage: async (sessionId: string, file: File): Promise<{ path: string }> => {
+  uploadImage: (sessionId: string, file: File, onProgress?: ProgressCallback): Promise<{ path: string }> => {
     const formData = new FormData();
     formData.append('image', file);
-
-    const res = await fetch(
+    return uploadWithProgress(
       `${BASE_URL}/sessions/${encodeURIComponent(sessionId)}/upload`,
-      { method: 'POST', body: formData }
+      formData,
+      onProgress,
     );
-
-    const data = await res.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Upload failed');
-    }
-    return data.data;
   },
 
   // Template endpoints

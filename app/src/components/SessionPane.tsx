@@ -22,7 +22,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-  const { uploadStatus, setUploading, setUploadResult } = useUploadStatus();
+  const { uploadStatus, setUploading, setUploadProgress, setUploadResult } = useUploadStatus();
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
@@ -70,7 +70,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
 
     setUploading(true);
     try {
-      const paths = await uploadFiles(sessionId, files);
+      const paths = await uploadFiles(sessionId, files, setUploadProgress);
       const msg = paths.length === 1
         ? `I uploaded a file to the session uploads folder: ${paths[0]}`
         : `I uploaded ${paths.length} files to the session uploads folder: ${paths.join(' ')}`;
@@ -84,7 +84,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
     } finally {
       if (filesInputRef.current) filesInputRef.current.value = '';
     }
-  }, [sessionId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadResult]);
+  }, [sessionId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
 
   // Auto-resize textarea
   useEffect(() => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 
 export interface UploadState {
   uploading: boolean;
+  progress: number;
   result: { type: 'success' | 'error'; message: string } | null;
 }
 
@@ -16,10 +17,19 @@ export function UploadStatus({ state, compact }: UploadStatusProps) {
   const textSize = compact ? 'text-[10px]' : 'text-xs';
 
   if (state.uploading) {
+    const pct = state.progress;
     return (
       <div className={`flex items-center gap-1.5 px-2 py-1 ${textSize}`}>
         <Spinner compact={compact} />
-        <span className="text-text-muted">Uploading...</span>
+        <span className="text-text-muted flex-1">Uploading{pct > 0 ? `... ${pct}%` : '...'}</span>
+        {pct > 0 && (
+          <div className={`${compact ? 'w-12' : 'w-16'} h-1 bg-border rounded-full overflow-hidden shrink-0`}>
+            <div
+              className="h-full bg-primary rounded-full transition-[width] duration-200"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
       </div>
     );
   }
@@ -57,35 +67,41 @@ function Spinner({ compact }: { compact?: boolean }) {
   );
 }
 
-/** Hook to manage upload status state with auto-clearing result */
+/** Hook to manage upload status state with progress and auto-clearing result */
 export function useUploadStatus(): {
   uploadStatus: UploadState;
   setUploading: (v: boolean) => void;
+  setUploadProgress: (pct: number) => void;
   setUploadResult: (type: 'success' | 'error', message: string) => void;
   clearResult: () => void;
 } {
   const [uploadStatus, setUploadStatus] = useState<UploadState>({
     uploading: false,
+    progress: 0,
     result: null,
   });
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const setUploading = useCallback((v: boolean) => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    setUploadStatus({ uploading: v, result: null });
+    setUploadStatus({ uploading: v, progress: 0, result: null });
+  }, []);
+
+  const setUploadProgress = useCallback((pct: number) => {
+    setUploadStatus((prev) => prev.uploading ? { ...prev, progress: pct } : prev);
   }, []);
 
   const setUploadResult = useCallback((type: 'success' | 'error', message: string) => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    setUploadStatus({ uploading: false, result: { type, message } });
+    setUploadStatus({ uploading: false, progress: 0, result: { type, message } });
     timerRef.current = setTimeout(() => {
-      setUploadStatus({ uploading: false, result: null });
+      setUploadStatus({ uploading: false, progress: 0, result: null });
     }, 3000);
   }, []);
 
   const clearResult = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    setUploadStatus({ uploading: false, result: null });
+    setUploadStatus({ uploading: false, progress: 0, result: null });
   }, []);
 
   useEffect(() => {
@@ -94,5 +110,5 @@ export function useUploadStatus(): {
     };
   }, []);
 
-  return { uploadStatus, setUploading, setUploadResult, clearResult };
+  return { uploadStatus, setUploading, setUploadProgress, setUploadResult, clearResult };
 }

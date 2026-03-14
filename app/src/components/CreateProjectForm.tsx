@@ -14,6 +14,7 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
   const [url, setUrl] = useState('');
   const [files, setFiles] = useState<FileList | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
@@ -46,14 +47,13 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
       }
 
       setSubmitting(true);
+      setUploadProgress(0);
       try {
         if (isZip) {
-          // Single zip — use zip upload path
-          const data = await api.uploadProject(name.trim(), files[0]);
+          const data = await api.uploadProject(name.trim(), files[0], setUploadProgress);
           onSuccess(data.path);
         } else {
-          // Multiple files — use files upload path
-          const data = await api.uploadProjectFiles(name.trim(), files);
+          const data = await api.uploadProjectFiles(name.trim(), files, setUploadProgress);
           onSuccess(data.path);
         }
       } catch (err) {
@@ -282,13 +282,25 @@ export function CreateProjectForm({ onSuccess, onCancel }: CreateProjectFormProp
           />
         </div>
 
+        {submitting && mode === 'upload' && uploadProgress > 0 && (
+          <div className="space-y-1">
+            <div className="w-full h-1.5 bg-border rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-[width] duration-200"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-text-muted text-center">{uploadProgress}%</p>
+          </div>
+        )}
+
         <Button
           type="submit"
           fullWidth
           loading={submitting}
           disabled={isSubmitDisabled}
         >
-          {mode === 'create' ? 'Create Folder' : mode === 'clone' ? 'Clone Repository' : 'Upload & Create'}
+          {mode === 'create' ? 'Create Folder' : mode === 'clone' ? 'Clone Repository' : submitting && uploadProgress > 0 ? `Uploading... ${uploadProgress}%` : 'Upload & Create'}
         </Button>
 
         {onCancel && (

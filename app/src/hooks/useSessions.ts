@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { api } from '../api/client';
+import { api, type ProgressCallback } from '../api/client';
 import type { Session, CreateSessionParams, SessionWithOutput } from '../types';
 
 interface UseSessionsReturn {
@@ -14,8 +14,8 @@ interface UseSessionsReturn {
   moveToProject: (id: string, projectId: string | null) => Promise<void>;
   updateTags: (id: string, tags: string[]) => Promise<void>;
   sendInput: (id: string, text: string) => Promise<void>;
-  uploadImage: (id: string, file: File) => Promise<string>;
-  uploadFiles: (id: string, files: FileList) => Promise<string[]>;
+  uploadImage: (id: string, file: File, onProgress?: ProgressCallback) => Promise<string>;
+  uploadFiles: (id: string, files: FileList, onProgress?: ProgressCallback) => Promise<string[]>;
   clearError: () => void;
 }
 
@@ -78,13 +78,13 @@ export function useSessions(): UseSessionsReturn {
     await api.sendInput(id, text);
   }, []);
 
-  const uploadImage = useCallback(async (id: string, file: File): Promise<string> => {
-    const result = await api.uploadImage(id, file);
+  const uploadImage = useCallback(async (id: string, file: File, onProgress?: ProgressCallback): Promise<string> => {
+    const result = await api.uploadImage(id, file, onProgress);
     return result.path;
   }, []);
 
-  const uploadFiles = useCallback(async (id: string, files: FileList): Promise<string[]> => {
-    const result = await api.uploadFiles(id, files);
+  const uploadFiles = useCallback(async (id: string, files: FileList, onProgress?: ProgressCallback): Promise<string[]> => {
+    const result = await api.uploadFiles(id, files, onProgress);
     return result.paths;
   }, []);
 

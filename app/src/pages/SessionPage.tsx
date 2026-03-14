@@ -52,7 +52,7 @@ export function SessionPage() {
   // Hidden file inputs for uploads
   const fileInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
-  const { uploadStatus, setUploading, setUploadResult } = useUploadStatus();
+  const { uploadStatus, setUploading, setUploadProgress, setUploadResult } = useUploadStatus();
 
   // Detect mobile (touch device with narrow screen)
   const isMobile = 'ontouchstart' in window && window.innerWidth < 768;
@@ -267,8 +267,13 @@ export function SessionPage() {
     setUploading(true);
     try {
       const paths: string[] = [];
-      for (const file of Array.from(files)) {
-        const path = await uploadImage(decodedId, file);
+      const fileArr = Array.from(files);
+      for (let i = 0; i < fileArr.length; i++) {
+        const path = await uploadImage(decodedId, fileArr[i], (pct) => {
+          // Scale progress across multiple files
+          const filePct = Math.round(((i + pct / 100) / fileArr.length) * 100);
+          setUploadProgress(filePct);
+        });
         paths.push(path);
       }
       // Send all file paths as input so Claude Code can read them
@@ -286,7 +291,7 @@ export function SessionPage() {
       // Reset the input so the same files can be selected again
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [decodedId, uploadStatus.uploading, uploadImage, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadResult]);
+  }, [decodedId, uploadStatus.uploading, uploadImage, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
 
   // File upload: open file picker
   const handleUploadFiles = useCallback(() => {
@@ -300,7 +305,7 @@ export function SessionPage() {
 
     setUploading(true);
     try {
-      const paths = await uploadFiles(decodedId, files);
+      const paths = await uploadFiles(decodedId, files, setUploadProgress);
       const msg = paths.length === 1
         ? `I uploaded a file to the session uploads folder: ${paths[0]}`
         : `I uploaded ${paths.length} files to the session uploads folder: ${paths.join(' ')}`;
@@ -314,7 +319,7 @@ export function SessionPage() {
     } finally {
       if (filesInputRef.current) filesInputRef.current.value = '';
     }
-  }, [decodedId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadResult]);
+  }, [decodedId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
 
   const handleShowInfo = useCallback(() => {
     setShowInfoSheet(true);
