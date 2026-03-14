@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { XtermTerminal } from './XtermTerminal';
+import { UploadStatus, useUploadStatus } from './UploadStatus';
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
 import { useSessions } from '../hooks/useSessions';
@@ -20,7 +21,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const { uploadStatus, setUploading, setUploadResult } = useUploadStatus();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,7 +64,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
 
   const handleFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0 || uploading) return;
+    if (!files || files.length === 0 || uploadStatus.uploading) return;
 
     setUploading(true);
     try {
@@ -74,13 +75,14 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       await sendInput(sessionId, msg);
       triggerFastPoll();
       notifySentText(`[uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}]`);
+      setUploadResult('success', `Uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}`);
     } catch (err) {
       console.error('Failed to upload files:', err);
+      setUploadResult('error', 'Upload failed');
     } finally {
-      setUploading(false);
       if (filesInputRef.current) filesInputRef.current.value = '';
     }
-  }, [sessionId, uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText]);
+  }, [sessionId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadResult]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -125,11 +127,14 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         />
       </div>
 
+      {/* Upload status */}
+      <UploadStatus state={uploadStatus} compact />
+
       {/* Compact input bar */}
       <div className="flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
         <button
           onClick={(e) => { e.stopPropagation(); handleUploadFiles(); }}
-          disabled={uploading}
+          disabled={uploadStatus.uploading}
           className="text-text-muted hover:text-primary disabled:opacity-30 px-0.5 py-0.5 mt-0.5 shrink-0"
           aria-label="Upload files"
           title="Upload files"

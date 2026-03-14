@@ -10,6 +10,7 @@ import { SlashCommandMenu, useSlashCommandState } from '../components/SlashComma
 import { SessionInfoSheet } from '../components/SessionInfoSheet';
 import { XtermTerminal } from '../components/XtermTerminal';
 import { MobileInputBar } from '../components/MobileInputBar';
+import { UploadStatus, useUploadStatus } from '../components/UploadStatus';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
 import { useTerminal } from '../hooks/useTerminal';
@@ -49,7 +50,7 @@ export function SessionPage() {
   // Hidden file inputs for uploads
   const fileInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const { uploadStatus, setUploading, setUploadResult } = useUploadStatus();
 
   // Detect mobile (touch device with narrow screen)
   const isMobile = 'ontouchstart' in window && window.innerWidth < 768;
@@ -259,7 +260,7 @@ export function SessionPage() {
   // Image upload: handle file selection (supports multiple)
   const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0 || !decodedId || uploading) return;
+    if (!files || files.length === 0 || !decodedId || uploadStatus.uploading) return;
 
     setUploading(true);
     try {
@@ -275,14 +276,15 @@ export function SessionPage() {
       await sendInput(decodedId, msg);
       triggerFastPoll();
       notifySentText(`[uploaded ${paths.length} image${paths.length > 1 ? 's' : ''}]`);
+      setUploadResult('success', `Uploaded ${paths.length} image${paths.length > 1 ? 's' : ''}`);
     } catch (err) {
       console.error('Failed to upload image:', err);
+      setUploadResult('error', 'Image upload failed');
     } finally {
-      setUploading(false);
       // Reset the input so the same files can be selected again
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [decodedId, uploading, uploadImage, sendInput, triggerFastPoll, notifySentText]);
+  }, [decodedId, uploadStatus.uploading, uploadImage, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadResult]);
 
   // File upload: open file picker
   const handleUploadFiles = useCallback(() => {
@@ -292,7 +294,7 @@ export function SessionPage() {
   // File upload: handle file selection
   const handleFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0 || !decodedId || uploading) return;
+    if (!files || files.length === 0 || !decodedId || uploadStatus.uploading) return;
 
     setUploading(true);
     try {
@@ -303,13 +305,14 @@ export function SessionPage() {
       await sendInput(decodedId, msg);
       triggerFastPoll();
       notifySentText(`[uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}]`);
+      setUploadResult('success', `Uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}`);
     } catch (err) {
       console.error('Failed to upload files:', err);
+      setUploadResult('error', 'Upload failed');
     } finally {
-      setUploading(false);
       if (filesInputRef.current) filesInputRef.current.value = '';
     }
-  }, [decodedId, uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText]);
+  }, [decodedId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadResult]);
 
   const handleShowInfo = useCallback(() => {
     setShowInfoSheet(true);
@@ -427,6 +430,9 @@ export function SessionPage() {
             disableKeyboard={isMobile}
           />
         </div>
+
+        {/* Upload status indicator */}
+        <UploadStatus state={uploadStatus} />
 
         {/* Mobile input bar — native text input + action toolbar instead of FAB */}
         {isMobile && (

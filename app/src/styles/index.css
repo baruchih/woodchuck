@@ -273,3 +273,14 @@ input, textarea, select {
 .sheet-slide-up {
   animation: sheet-slide-up 0.25s ease-out;
 }
+
+@keyframes upload-result-fade {
+  0% { opacity: 0; transform: translateY(4px); }
+  10% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.upload-result-fade {
+  animation: upload-result-fade 3s ease-out forwards;
+}
