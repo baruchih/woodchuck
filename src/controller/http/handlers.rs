@@ -16,7 +16,7 @@ use super::response::{
     MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData, SessionCreatedData,
     SessionData, SessionKilledData, SessionUpdatedData, SessionsData, TemplateData,
-    TemplateDeletedData, TemplatesListData, UploadProjectData, UploadedImageData, VapidKeyData,
+    TemplateDeletedData, TemplatesListData, UploadProjectData, UploadedFilesData, UploadedImageData, VapidKeyData,
 };
 use super::state::AppState;
 
@@ -1039,6 +1039,121 @@ pub async fn upload_image_handler(
     Ok((
         StatusCode::CREATED,
         ApiResponse::ok(UploadedImageData { path: abs_path }),
+    ))
+}
+
+/// Maximum file upload size for session uploads: 100 MB total
+const MAX_SESSION_UPLOAD_SIZE: usize = 100 * 1024 * 1024;
+
+/// POST /sessions/:id/upload-files - Upload files to a session's uploads/ folder
+///
+/// Accepts multiple files via multipart. Files are saved to `{session_folder}/uploads/`
+/// preserving any relative path structure. Returns the list of absolute file paths.
+#[instrument(skip(state, multipart))]
+pub async fn upload_files_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    mut multipart: Multipart,
+) -> ApiResultCreated<UploadedFilesData> {
+    // Get session to find its folder
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+
+    let uploads_dir = std::path::PathBuf::from(&session.folder).join("uploads");
+    tokio::fs::create_dir_all(&uploads_dir)
+        .await
+        .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to create uploads dir: {}", e), "IO_ERROR"))?;
+
+    let mut paths: Vec<String> = Vec::new();
+    let mut total_size: usize = 0;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| err_msg(StatusCode::BAD_REQUEST, &format!("Invalid multipart: {}", e), "INVALID_INPUT"))?
+    {
+        let file_name = field.file_name().unwrap_or("").to_string();
+        if file_name.is_empty() {
+            continue;
+        }
+
+        let data = field.bytes().await.map_err(|e| {
+            err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read file: {}", e), "INVALID_INPUT")
+        })?;
+
+        total_size += data.len();
+        if total_size > MAX_SESSION_UPLOAD_SIZE {
+            return Err(err_msg(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                &format!("Total upload too large (max {} MB)", MAX_SESSION_UPLOAD_SIZE / 1024 / 1024),
+                "PAYLOAD_TOO_LARGE",
+            ));
+        }
+
+        // Sanitize the filename: use only the last component to prevent path traversal
+        let safe_name = std::path::Path::new(&file_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+
+        // Skip hidden files
+        if safe_name.starts_with('.') {
+            continue;
+        }
+
+        let out_path = uploads_dir.join(safe_name);
+
+        // Ensure output is within uploads dir
+        if !out_path.starts_with(&uploads_dir) {
+            continue;
+        }
+
+        // If file already exists, add a numeric suffix
+        let final_path = if out_path.exists() {
+            let stem = std::path::Path::new(safe_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file");
+            let ext = std::path::Path::new(safe_name)
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| format!(".{}", e))
+                .unwrap_or_default();
+            let mut suffix = 1u32;
+            loop {
+                let candidate = uploads_dir.join(format!("{}-{}{}", stem, suffix, ext));
+                if !candidate.exists() {
+                    break candidate;
+                }
+                suffix += 1;
+            }
+        } else {
+            out_path
+        };
+
+        tokio::fs::write(&final_path, &data)
+            .await
+            .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to write file: {}", e), "IO_ERROR"))?;
+
+        let abs_path = final_path
+            .canonicalize()
+            .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to resolve path: {}", e), "IO_ERROR"))?
+            .to_string_lossy()
+            .to_string();
+
+        paths.push(abs_path);
+    }
+
+    if paths.is_empty() {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "No files uploaded", "INVALID_INPUT"));
+    }
+
+    info!(session = %session_id, count = paths.len(), total_size, "Files uploaded to session");
+
+    Ok((
+        StatusCode::CREATED,
+        ApiResponse::ok(UploadedFilesData { paths }),
     ))
 }
 

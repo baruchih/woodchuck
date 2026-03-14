@@ -194,6 +194,24 @@ export const api = {
     return data.data;
   },
 
+  uploadFiles: async (sessionId: string, files: FileList): Promise<{ paths: string[] }> => {
+    const formData = new FormData();
+    for (const file of Array.from(files)) {
+      formData.append('files', file, file.name);
+    }
+
+    const res = await fetch(
+      `${BASE_URL}/sessions/${encodeURIComponent(sessionId)}/upload-files`,
+      { method: 'POST', body: formData }
+    );
+
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Upload failed');
+    }
+    return data.data;
+  },
+
   uploadImage: async (sessionId: string, file: File): Promise<{ path: string }> => {
     const formData = new FormData();
     formData.append('image', file);

@@ -21,7 +21,7 @@ import type { Session, Command } from '../types';
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getSession, deleteSession, sendInput, uploadImage, renameSession, moveToProject } = useSessions();
+  const { getSession, deleteSession, sendInput, uploadImage, uploadFiles, renameSession, moveToProject } = useSessions();
   const { projects, refresh: refreshProjects } = useProjects();
   const { resize, sendRawInput } = useWS();
 
@@ -46,8 +46,9 @@ export function SessionPage() {
   // Ref to track if we're in slash mode (typing a slash command)
   const slashModeRef = useRef(false);
 
-  // Hidden file input for image upload
+  // Hidden file inputs for uploads
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
   // Detect mobile (touch device with narrow screen)
@@ -283,6 +284,33 @@ export function SessionPage() {
     }
   }, [decodedId, uploading, uploadImage, sendInput, triggerFastPoll, notifySentText]);
 
+  // File upload: open file picker
+  const handleUploadFiles = useCallback(() => {
+    filesInputRef.current?.click();
+  }, []);
+
+  // File upload: handle file selection
+  const handleFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !decodedId || uploading) return;
+
+    setUploading(true);
+    try {
+      const paths = await uploadFiles(decodedId, files);
+      const msg = paths.length === 1
+        ? `I uploaded a file to the session uploads folder: ${paths[0]}`
+        : `I uploaded ${paths.length} files to the session uploads folder: ${paths.join(' ')}`;
+      await sendInput(decodedId, msg);
+      triggerFastPoll();
+      notifySentText(`[uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}]`);
+    } catch (err) {
+      console.error('Failed to upload files:', err);
+    } finally {
+      setUploading(false);
+      if (filesInputRef.current) filesInputRef.current.value = '';
+    }
+  }, [decodedId, uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText]);
+
   const handleShowInfo = useCallback(() => {
     setShowInfoSheet(true);
   }, []);
@@ -406,6 +434,7 @@ export function SessionPage() {
             onSend={handleMobileSend}
             onSendKey={handleSendKey}
             onUploadImage={handleUploadImage}
+            onUploadFiles={handleUploadFiles}
             onKillSession={() => setShowKillConfirm(true)}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
@@ -493,6 +522,7 @@ export function SessionPage() {
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           onUploadImage={handleUploadImage}
+          onUploadFiles={handleUploadFiles}
         />
       )}
 
@@ -536,6 +566,14 @@ export function SessionPage() {
         multiple
         className="hidden"
         onChange={handleFileSelected}
+      />
+      {/* Hidden file input for general file upload */}
+      <input
+        ref={filesInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFilesSelected}
       />
     </Layout>
   );

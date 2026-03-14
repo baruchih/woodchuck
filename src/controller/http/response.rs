@@ -348,6 +348,12 @@ pub struct UploadProjectData {
     pub path: String,
 }
 
+/// Upload files to session response
+#[derive(Debug, Serialize)]
+pub struct UploadedFilesData {
+    pub paths: Vec<String>,
+}
+
 // =============================================================================
 // IntoResponse Implementation
 // =============================================================================

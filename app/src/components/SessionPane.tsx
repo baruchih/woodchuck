@@ -14,13 +14,15 @@ interface SessionPaneProps {
 }
 
 export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove }: SessionPaneProps) {
-  const { sendInput } = useSessions();
+  const { sendInput, uploadFiles } = useSessions();
   const { resize, sendRawInput } = useWS();
   const { content, needsAttention, triggerFastPoll, notifySentText } = useTerminal({ sessionId });
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
 
   const handleTerminalInput = useCallback((data: string) => {
     if (!focused) return;
@@ -54,6 +56,31 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       handleSend();
     }
   }, [handleSend]);
+
+  const handleUploadFiles = useCallback(() => {
+    filesInputRef.current?.click();
+  }, []);
+
+  const handleFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || uploading) return;
+
+    setUploading(true);
+    try {
+      const paths = await uploadFiles(sessionId, files);
+      const msg = paths.length === 1
+        ? `I uploaded a file to the session uploads folder: ${paths[0]}`
+        : `I uploaded ${paths.length} files to the session uploads folder: ${paths.join(' ')}`;
+      await sendInput(sessionId, msg);
+      triggerFastPoll();
+      notifySentText(`[uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}]`);
+    } catch (err) {
+      console.error('Failed to upload files:', err);
+    } finally {
+      setUploading(false);
+      if (filesInputRef.current) filesInputRef.current.value = '';
+    }
+  }, [sessionId, uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -100,6 +127,21 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
 
       {/* Compact input bar */}
       <div className="flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
+        <button
+          onClick={(e) => { e.stopPropagation(); handleUploadFiles(); }}
+          disabled={uploading}
+          className="text-text-muted hover:text-primary disabled:opacity-30 px-0.5 py-0.5 mt-0.5 shrink-0"
+          aria-label="Upload files"
+          title="Upload files"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="12" y1="18" x2="12" y2="12" />
+            <line x1="9" y1="15" x2="12" y2="12" />
+            <line x1="15" y1="15" x2="12" y2="12" />
+          </svg>
+        </button>
         <textarea
           ref={textareaRef}
           value={inputText}
@@ -119,6 +161,14 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
           Send
         </button>
       </div>
+      {/* Hidden file input */}
+      <input
+        ref={filesInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handleFilesSelected}
+      />
     </div>
   );
 }
