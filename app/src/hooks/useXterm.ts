@@ -235,13 +235,20 @@ export function useXterm({
 
     lastContentRef.current = content;
 
+    // Check if user is at the bottom BEFORE we write — only auto-scroll
+    // back to bottom after the write if they were already there.
+    const viewport = terminal.buffer.active;
+    const wasAtBottom = viewport.baseY <= viewport.viewportY;
+
     // Move cursor to home position and clear from cursor to end of screen,
     // then write content. Using ED(0) instead of ED(2) preserves scrollback
     // so the user can scroll up through history.
     writingRef.current = true;
     terminal.write('\x1b[H\x1b[J' + content, () => {
       writingRef.current = false;
-      terminal.scrollToBottom();
+      if (wasAtBottom) {
+        terminal.scrollToBottom();
+      }
     });
   }, []);
 

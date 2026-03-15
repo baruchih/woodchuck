@@ -5,6 +5,7 @@
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::StatusCode,
+    response::IntoResponse,
     Json,
 };
 use serde::Deserialize;
@@ -1255,6 +1256,72 @@ async fn list_dir_recursive(
     }
 
     entries
+}
+
+/// Query params for file download
+#[derive(Debug, Deserialize)]
+pub struct DownloadQuery {
+    pub path: String,
+}
+
+/// GET /sessions/:id/download?path=relative/path — serve a file from the session's project folder
+#[instrument(skip(state))]
+pub async fn download_file_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiResponse<()>>)> {
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+
+    let root = std::path::PathBuf::from(&session.folder);
+    if !root.is_dir() {
+        return Err(err_msg(StatusCode::NOT_FOUND, "Session folder not found", "FOLDER_NOT_FOUND"));
+    }
+
+    // Resolve and canonicalize to prevent path traversal
+    let requested = root.join(&query.path);
+    let canonical = requested.canonicalize().map_err(|_| {
+        err_msg(StatusCode::NOT_FOUND, "File not found", "FILE_NOT_FOUND")
+    })?;
+    let canonical_root = root.canonicalize().map_err(|_| {
+        err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Could not resolve folder", "IO_ERROR")
+    })?;
+
+    if !canonical.starts_with(&canonical_root) {
+        return Err(err_msg(StatusCode::FORBIDDEN, "Path outside session folder", "FORBIDDEN"));
+    }
+
+    if canonical.is_dir() {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Cannot download a directory", "INVALID_INPUT"));
+    }
+
+    let file_bytes = tokio::fs::read(&canonical).await.map_err(|_| {
+        err_msg(StatusCode::NOT_FOUND, "File not found", "FILE_NOT_FOUND")
+    })?;
+
+    let file_name = canonical
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let content_type = "application/octet-stream".to_string();
+
+    debug!(session = %session_id, path = %query.path, size = file_bytes.len(), "Serving file download");
+
+    Ok((
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", file_name),
+            ),
+        ],
+        file_bytes,
+    ))
 }
 
 /// DELETE /projects/:id - Delete a project (sessions become ungrouped)

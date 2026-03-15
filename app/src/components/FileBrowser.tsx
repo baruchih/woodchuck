@@ -116,7 +116,7 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
           {!loading && !error && files.length > 0 && (
             <div className="space-y-px">
               {files.map((entry) => (
-                <FileNode key={entry.path} entry={entry} depth={0} />
+                <FileNode key={entry.path} entry={entry} depth={0} sessionId={sessionId} />
               ))}
             </div>
           )}
@@ -126,7 +126,7 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
   );
 }
 
-function FileNode({ entry, depth }: { entry: FileEntry; depth: number }) {
+function FileNode({ entry, depth, sessionId }: { entry: FileEntry; depth: number; sessionId: string }) {
   const [expanded, setExpanded] = useState(depth < 1);
 
   const paddingLeft = depth * 16 + 8;
@@ -165,7 +165,7 @@ function FileNode({ entry, depth }: { entry: FileEntry; depth: number }) {
         {expanded && entry.children && (
           <div>
             {entry.children.map((child) => (
-              <FileNode key={child.path} entry={child} depth={depth + 1} />
+              <FileNode key={child.path} entry={child} depth={depth + 1} sessionId={sessionId} />
             ))}
           </div>
         )}
@@ -173,9 +173,11 @@ function FileNode({ entry, depth }: { entry: FileEntry; depth: number }) {
     );
   }
 
+  const downloadUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(entry.path)}`;
+
   return (
     <div
-      className="flex items-center gap-1.5 py-1 px-2 rounded hover:bg-surface"
+      className="flex items-center gap-1.5 py-1 px-2 rounded hover:bg-surface group"
       style={{ paddingLeft: paddingLeft + 12 + 6 }}
     >
       {/* File icon */}
@@ -184,8 +186,22 @@ function FileNode({ entry, depth }: { entry: FileEntry; depth: number }) {
         <polyline points="14 2 14 8 20 8" />
       </svg>
       <span className="text-xs text-text truncate">{entry.name}</span>
+      {/* Download button — visible on hover */}
+      <a
+        href={downloadUrl}
+        download={entry.name}
+        className="ml-auto shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+        aria-label={`Download ${entry.name}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      </a>
       {entry.size != null && (
-        <span className="text-[10px] text-text-muted ml-auto shrink-0">{formatSize(entry.size)}</span>
+        <span className="text-[10px] text-text-muted shrink-0">{formatSize(entry.size)}</span>
       )}
     </div>
   );
