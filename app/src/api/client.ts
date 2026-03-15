@@ -117,8 +117,10 @@ export const api = {
   poll: (id: string): Promise<PollData> =>
     request(`/sessions/${encodeURIComponent(id)}/poll`),
 
-  getSessionFiles: (id: string): Promise<SessionFilesData> =>
-    request(`/sessions/${encodeURIComponent(id)}/files`),
+  getSessionFiles: (id: string, path?: string): Promise<SessionFilesData> => {
+    const query = path ? `?path=${encodeURIComponent(path)}` : '';
+    return request(`/sessions/${encodeURIComponent(id)}/files${query}`);
+  },
 
   resize: (id: string, params: ResizeParams): Promise<void> =>
     request(`/sessions/${encodeURIComponent(id)}/resize`, {

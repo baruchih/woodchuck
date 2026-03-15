@@ -1161,10 +1161,20 @@ pub async fn upload_files_handler(
 /// GET /sessions/:id/files - List files in the session's project folder
 ///
 /// Returns a recursive tree of files and directories (max depth 4, skips hidden dirs).
+/// Query params for session files listing
+#[derive(Debug, Deserialize)]
+pub struct FilesQuery {
+    /// Optional subdirectory path (relative to session root) to list.
+    /// When omitted, lists the root directory.
+    pub path: Option<String>,
+}
+
+/// GET /sessions/:id/files?path= — list a single directory level (lazy loading)
 #[instrument(skip(state))]
 pub async fn session_files_handler(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
+    Query(query): Query<FilesQuery>,
 ) -> ApiResult<SessionFilesData> {
     let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
         .await
@@ -1179,21 +1189,45 @@ pub async fn session_files_handler(
         ));
     }
 
-    let files = list_dir_recursive(&root, &root, 0, 4).await;
+    // Resolve target directory, with path traversal protection
+    let target = if let Some(ref subpath) = query.path {
+        let requested = root.join(subpath);
+        let canonical = requested.canonicalize().map_err(|_| {
+            err_msg(StatusCode::NOT_FOUND, "Directory not found", "DIR_NOT_FOUND")
+        })?;
+        let canonical_root = root.canonicalize().map_err(|_| {
+            err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Could not resolve folder", "IO_ERROR")
+        })?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(err_msg(StatusCode::FORBIDDEN, "Path outside session folder", "FORBIDDEN"));
+        }
+        if !canonical.is_dir() {
+            return Err(err_msg(StatusCode::BAD_REQUEST, "Path is not a directory", "INVALID_INPUT"));
+        }
+        canonical
+    } else {
+        root.canonicalize().map_err(|_| {
+            err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Could not resolve folder", "IO_ERROR")
+        })?
+    };
 
-    debug!(session = %session_id, count = files.len(), "Listed session files");
+    let canonical_root = root.canonicalize().map_err(|_| {
+        err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Could not resolve folder", "IO_ERROR")
+    })?;
+
+    let files = list_dir_single_level(&canonical_root, &target).await;
+
+    debug!(session = %session_id, path = ?query.path, count = files.len(), "Listed session files");
     Ok(ApiResponse::ok(SessionFilesData {
         root: session.folder,
         files,
     }))
 }
 
-/// Recursively list directory contents up to max_depth
-async fn list_dir_recursive(
+/// List a single directory level (no recursion — children are loaded on demand)
+async fn list_dir_single_level(
     base: &std::path::Path,
     dir: &std::path::Path,
-    depth: u32,
-    max_depth: u32,
 ) -> Vec<FileEntry> {
     let mut entries = Vec::new();
 
@@ -1231,18 +1265,12 @@ async fn list_dir_recursive(
         };
 
         if metadata.is_dir() {
-            let children = if depth < max_depth {
-                Some(Box::pin(list_dir_recursive(base, &path, depth + 1, max_depth)).await)
-            } else {
-                None
-            };
-
             entries.push(FileEntry {
                 name,
                 path: relative,
                 is_dir: true,
                 size: None,
-                children,
+                children: None, // loaded on demand by the frontend
             });
         } else {
             entries.push(FileEntry {

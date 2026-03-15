@@ -127,16 +127,37 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
 }
 
 function FileNode({ entry, depth, sessionId }: { entry: FileEntry; depth: number; sessionId: string }) {
-  const [expanded, setExpanded] = useState(depth < 1);
+  const [expanded, setExpanded] = useState(false);
+  const [children, setChildren] = useState<FileEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const paddingLeft = depth * 16 + 8;
 
+  const handleToggle = useCallback(async () => {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    setExpanded(true);
+    // Fetch children on first expand
+    if (children === null) {
+      setLoading(true);
+      try {
+        const data = await api.getSessionFiles(sessionId, entry.path);
+        setChildren(data.files);
+      } catch {
+        setChildren([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+  }, [expanded, children, sessionId, entry.path]);
+
   if (entry.is_dir) {
-    const hasChildren = entry.children && entry.children.length > 0;
     return (
       <div>
         <button
-          onClick={() => setExpanded(!expanded)}
+          onClick={handleToggle}
           className="w-full flex items-center gap-1.5 py-1 px-2 rounded hover:bg-surface text-left group"
           style={{ paddingLeft }}
         >
@@ -158,15 +179,23 @@ function FileNode({ entry, depth, sessionId }: { entry: FileEntry; depth: number
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
           <span className="text-xs text-text truncate">{entry.name}</span>
-          {hasChildren && (
-            <span className="text-[10px] text-text-muted ml-auto shrink-0">{entry.children!.length}</span>
+          {loading && (
+            <svg className="w-3 h-3 animate-spin text-text-muted ml-auto shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
           )}
         </button>
-        {expanded && entry.children && (
+        {expanded && children && children.length > 0 && (
           <div>
-            {entry.children.map((child) => (
+            {children.map((child) => (
               <FileNode key={child.path} entry={child} depth={depth + 1} sessionId={sessionId} />
             ))}
+          </div>
+        )}
+        {expanded && children && children.length === 0 && !loading && (
+          <div className="text-[10px] text-text-muted py-1" style={{ paddingLeft: paddingLeft + 24 }}>
+            Empty
           </div>
         )}
       </div>
