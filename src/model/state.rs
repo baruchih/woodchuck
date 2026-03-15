@@ -94,6 +94,10 @@ impl SessionState {
 
     /// Create session state from persisted data
     pub fn from_persisted(persisted: PersistedSessionState) -> Self {
+        // Pre-set last_notified_status to the restored status so the poller
+        // doesn't re-notify for sessions that were already in this state
+        // before the server restarted.
+        let last_notified_status = Some(persisted.status);
         Self {
             name: persisted.name,
             status: persisted.status,
@@ -102,6 +106,7 @@ impl SessionState {
             project_id: persisted.project_id,
             last_input: persisted.last_input,
             tags: persisted.tags,
+            last_notified_status,
             ..Self::default()
         }
     }
@@ -322,6 +327,9 @@ mod tests {
         assert!(restored.full_output.is_empty());
         assert_eq!(restored.last_output_hash, 0);
         assert_eq!(restored.subscriber_count, 0);
+
+        // last_notified_status should be pre-set to prevent re-notification on restart
+        assert_eq!(restored.last_notified_status, Some(SessionStatus::Working));
     }
 
     #[test]
@@ -338,5 +346,7 @@ mod tests {
         assert!(restored.working_since.is_none());
         assert!(restored.last_working_at.is_none());
         assert!(restored.project_id.is_none());
+        // Should not re-notify for a resting session after restart
+        assert_eq!(restored.last_notified_status, Some(SessionStatus::Resting));
     }
 }
