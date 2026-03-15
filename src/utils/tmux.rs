@@ -161,7 +161,7 @@ impl TmuxClient for Tmux {
         // Bare key names sent without -l flag (tmux interprets these as special keys)
         let bare_keys: &[&str] = &[
             "", "Enter", "Escape", "Up", "Down", "Left", "Right",
-            "Tab", "BTab", "C-c", "C-d", "C-z", "y", "n",
+            "Tab", "BTab", "C-b", "C-c", "C-d", "C-z", "y", "n",
         ];
 
         if bare_keys.contains(&keys) {
@@ -226,6 +226,7 @@ impl TmuxClient for Tmux {
             "\x1b[D" => "Left",
             "\t" => "Tab",
             "\x1b[Z" => "BTab",
+            "\x02" => "C-b",
             "\x03" => "C-c",
             "\x04" => "C-d",
             "\x1a" => "C-z",
@@ -600,7 +601,7 @@ mod tests {
         // These are the bare key names that should be sent without -l flag
         let bare_keys: &[&str] = &[
             "", "Enter", "Escape", "Up", "Down", "Left", "Right",
-            "Tab", "BTab", "C-c", "C-d", "C-z", "y", "n",
+            "Tab", "BTab", "C-b", "C-c", "C-d", "C-z", "y", "n",
         ];
 
         // Verify bare keys are recognized

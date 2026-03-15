@@ -25,7 +25,7 @@ interface KeyItem {
 // Inner ring — the four always-present core keys at cardinal positions
 const INNER_KEYS: KeyItem[] = [
   { label: 'ENTER', key: 'Enter', variant: 'primary' },   // 12 o'clock
-  { label: 'C-c', key: 'C-c', variant: 'danger' },        // 3 o'clock
+  { label: 'C-b', key: 'C-b', variant: 'ghost' },           // 3 o'clock
   { label: 'KILL', key: '__kill__', variant: 'danger' },   // 6 o'clock
   { label: 'ESC', key: 'Escape', variant: 'ghost' },       // 9 o'clock
 ];

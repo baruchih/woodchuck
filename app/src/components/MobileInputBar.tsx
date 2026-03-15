@@ -47,7 +47,7 @@ export function MobileInputBar({
       <div className="flex items-center gap-1 px-2 py-1 border-b border-border/50 overflow-x-auto">
         <ActionButton label="Enter" onClick={() => onSendKey('Enter')} />
         <ActionButton label="Esc" onClick={() => onSendKey('Escape')} />
-        <ActionButton label="C-c" onClick={() => onSendKey('C-c')} variant="danger" />
+        <ActionButton label="C-b" onClick={() => onSendKey('C-b')} />
         <ActionButton label="Tab" onClick={() => onSendKey('Tab')} />
         <ActionButton label="A+" onClick={onZoomIn} />
         <ActionButton label="A-" onClick={onZoomOut} />
