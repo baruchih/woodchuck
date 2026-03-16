@@ -360,9 +360,10 @@ function FileViewer({
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-background">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
+      {/* Header — two rows on mobile, one on desktop */}
+      <div className="border-b border-border shrink-0">
+        {/* Top row: back button + file name */}
+        <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
           <button
             onClick={onClose}
             className="text-text-muted hover:text-text shrink-0 p-0.5"
@@ -373,45 +374,48 @@ function FileViewer({
             </svg>
           </button>
           <span className="text-sm font-medium text-text truncate">{name}</span>
-          <span className="text-[10px] text-text-muted shrink-0">{path}</span>
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Copy all button */}
-          <button
-            onClick={handleCopyAll}
-            disabled={!content}
-            className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary disabled:opacity-30 transition-colors"
-          >
-            {copied ? (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-status-success">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-                Copied
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                </svg>
-                Copy all
-              </>
-            )}
-          </button>
-          {/* Download */}
-          <a
-            href={downloadUrl}
-            download={name}
-            className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            Download
-          </a>
+        {/* Bottom row: path + action buttons */}
+        <div className="flex items-center justify-between gap-2 px-3 pb-2">
+          <span className="text-[10px] text-text-muted truncate">{path}</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Copy all button */}
+            <button
+              onClick={handleCopyAll}
+              disabled={!content}
+              className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary disabled:opacity-30 transition-colors"
+            >
+              {copied ? (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 text-status-success">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Copied
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  Copy all
+                </>
+              )}
+            </button>
+            {/* Download */}
+            <a
+              href={downloadUrl}
+              download={name}
+              className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Download
+            </a>
+          </div>
         </div>
       </div>
 
