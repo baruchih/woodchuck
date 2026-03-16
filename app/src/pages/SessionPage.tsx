@@ -462,6 +462,7 @@ export function SessionPage() {
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           sending={sending}
+          commands={commands}
         />
 
         {/* Typing preview bar with slash command menu */}

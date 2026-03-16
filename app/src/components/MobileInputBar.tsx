@@ -1,4 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
+import { SlashCommandMenu, useSlashCommandState } from './SlashCommandMenu';
+import type { Command } from '../types';
 
 interface MobileInputBarProps {
   onSend: (text: string) => void;
@@ -11,6 +13,7 @@ interface MobileInputBarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   sending?: boolean;
+  commands?: Command[];
 }
 
 export function MobileInputBar({
@@ -24,24 +27,64 @@ export function MobileInputBar({
   onZoomIn,
   onZoomOut,
   sending,
+  commands = [],
 }: MobileInputBarProps) {
   const [text, setText] = useState('');
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const { showMenu, filteredCommands } = useSlashCommandState(text, commands);
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
     onSend(trimmed);
     setText('');
+    setSlashSelectedIndex(0);
     inputRef.current?.focus();
   }, [text, sending, onSend]);
 
+  const handleSlashSelect = useCallback((command: Command) => {
+    const newText = `/${command.name} `;
+    setText(newText);
+    setSlashSelectedIndex(0);
+    inputRef.current?.focus();
+  }, []);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (showMenu && filteredCommands.length > 0) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashSelectedIndex(prev =>
+          prev <= 0 ? filteredCommands.length - 1 : prev - 1
+        );
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashSelectedIndex(prev =>
+          prev >= filteredCommands.length - 1 ? 0 : prev + 1
+        );
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const cmd = filteredCommands[slashSelectedIndex];
+        if (cmd) handleSlashSelect(cmd);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setText('');
+        setSlashSelectedIndex(0);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  }, [handleSend]);
+  }, [handleSend, showMenu, filteredCommands, slashSelectedIndex, handleSlashSelect]);
 
   return (
     <div className="border-t border-border bg-surface shrink-0">
@@ -59,7 +102,15 @@ export function MobileInputBar({
       </div>
 
       {/* Text input row */}
-      <div className="px-2 py-1.5 flex items-center gap-1.5">
+      <div className="relative px-2 py-1.5 flex items-center gap-1.5">
+        {/* Slash command autocomplete menu */}
+        <SlashCommandMenu
+          open={showMenu}
+          commands={filteredCommands}
+          selectedIndex={slashSelectedIndex}
+          onSelect={handleSlashSelect}
+          onClose={() => { setText(''); setSlashSelectedIndex(0); }}
+        />
         {/* Image upload button */}
         <button
           type="button"
@@ -94,7 +145,7 @@ export function MobileInputBar({
           ref={inputRef}
           type="text"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); setSlashSelectedIndex(0); }}
           onKeyDown={handleKeyDown}
           placeholder="Type a message..."
           className="flex-1 bg-background border border-border rounded-sm px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-primary"
