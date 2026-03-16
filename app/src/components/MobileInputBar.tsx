@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { SlashCommandMenu, useSlashCommandState } from './SlashCommandMenu';
 import type { Command } from '../types';
 
@@ -31,7 +31,7 @@ export function MobileInputBar({
 }: MobileInputBarProps) {
   const [text, setText] = useState('');
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { showMenu, filteredCommands } = useSlashCommandState(text, commands);
 
@@ -50,6 +50,14 @@ export function MobileInputBar({
     setSlashSelectedIndex(0);
     inputRef.current?.focus();
   }, []);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = inputRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+  }, [text]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (showMenu && filteredCommands.length > 0) {
@@ -141,14 +149,14 @@ export function MobileInputBar({
         </button>
 
         {/* Text input */}
-        <input
+        <textarea
           ref={inputRef}
-          type="text"
           value={text}
           onChange={(e) => { setText(e.target.value); setSlashSelectedIndex(0); }}
           onKeyDown={handleKeyDown}
           placeholder="Type a message..."
-          className="flex-1 bg-background border border-border rounded-sm px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-primary"
+          rows={1}
+          className="flex-1 bg-background border border-border rounded-sm px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-primary resize-none overflow-hidden"
           autoComplete="off"
           autoCorrect="on"
         />
