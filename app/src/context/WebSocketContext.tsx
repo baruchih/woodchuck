@@ -36,6 +36,8 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const outputListenersRef = useRef<Set<(msg: OutputMessage) => void>>(new Set());
   const statusListenersRef = useRef<Set<(msg: StatusMessage) => void>>(new Set());
   const errorListenersRef = useRef<Set<(msg: ErrorMessage) => void>>(new Set());
+  const lastMessageTimeRef = useRef<number>(Date.now());
+  const healthCheckRef = useRef<number>();
 
   const getWebSocketUrl = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -44,9 +46,14 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   }, []);
 
   const send = useCallback((msg: ClientMessage) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(msg));
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+    } else if (ws?.readyState === WebSocket.CLOSED || ws?.readyState === WebSocket.CLOSING || !ws) {
+      // Connection died — trigger reconnect
+      connect();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const resubscribeAll = useCallback(() => {
@@ -83,6 +90,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     };
 
     ws.onmessage = (event) => {
+      lastMessageTimeRef.current = Date.now();
       try {
         const msg = JSON.parse(event.data) as ServerMessage;
 
@@ -114,6 +122,29 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       wsRef.current?.close();
     };
   }, [connect]);
+
+  // Health check: detect silent WebSocket disconnections
+  // If we have active subscriptions but haven't received any message in 30s,
+  // the connection is likely dead (half-open TCP). Force reconnect.
+  useEffect(() => {
+    healthCheckRef.current = window.setInterval(() => {
+      const ws = wsRef.current;
+      const hasSubscriptions = subscriptionsRef.current.size > 0;
+      const elapsed = Date.now() - lastMessageTimeRef.current;
+
+      if (hasSubscriptions && elapsed > 30_000) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          console.warn(`WebSocket stale (no message for ${Math.round(elapsed / 1000)}s) — reconnecting`);
+          ws.close();
+          // onclose handler will trigger reconnect
+        }
+      }
+    }, 15_000);
+
+    return () => {
+      clearInterval(healthCheckRef.current);
+    };
+  }, []);
 
   // Handle visibility change (phone sleep/background)
   // Use ref to avoid re-registering on every connected change

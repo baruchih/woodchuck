@@ -441,20 +441,18 @@ export function SessionPage() {
         {/* Upload status indicator */}
         <UploadStatus state={uploadStatus} />
 
-        {/* Mobile input bar — native text input + action toolbar instead of FAB */}
-        {isMobile && (
-          <MobileInputBar
-            onSend={handleMobileSend}
-            onSendKey={handleSendKey}
-            onUploadImage={handleUploadImage}
-            onUploadFiles={handleUploadFiles}
-            onBrowseFiles={() => setShowFileBrowser(true)}
-            onKillSession={() => setShowKillConfirm(true)}
-            onZoomIn={zoomIn}
-            onZoomOut={zoomOut}
-            sending={sending}
-          />
-        )}
+        {/* Input bar — text input + action toolbar for reliable message sending */}
+        <MobileInputBar
+          onSend={handleMobileSend}
+          onSendKey={handleSendKey}
+          onUploadImage={handleUploadImage}
+          onUploadFiles={handleUploadFiles}
+          onBrowseFiles={() => setShowFileBrowser(true)}
+          onKillSession={() => setShowKillConfirm(true)}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          sending={sending}
+        />
 
         {/* Typing preview bar with slash command menu */}
         {(hasTypedText || showSlashMenu) && (
