@@ -145,29 +145,25 @@ export function NewSessionPage() {
                     key={session.id}
                     className="bg-surface border border-border rounded-sm p-3"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-text text-sm font-medium truncate">{session.name}</div>
-                        <div className="text-text-muted text-xs font-mono mt-1 truncate">
-                          {truncatePath(session.folder, 40)}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                        <button
-                          onClick={() => handleRecover(session.id)}
-                          disabled={recoveringId !== null}
-                          className="text-xs uppercase tracking-wider px-3 py-1.5 bg-primary text-white rounded-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
-                        >
-                          {recoveringId === session.id ? 'Recovering...' : 'Recover'}
-                        </button>
-                        <button
-                          onClick={() => handleDiscard(session.id)}
-                          disabled={recoveringId !== null}
-                          className="text-xs uppercase tracking-wider px-3 py-1.5 text-text-muted hover:text-status-error transition-colors disabled:opacity-50"
-                        >
-                          Discard
-                        </button>
-                      </div>
+                    <div className="text-text text-sm font-medium truncate">{session.name}</div>
+                    <div className="text-text-muted text-xs font-mono mt-1 truncate">
+                      {truncatePath(session.folder, 40)}
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <button
+                        onClick={() => handleRecover(session.id)}
+                        disabled={recoveringId !== null}
+                        className="text-xs uppercase tracking-wider px-3 py-1.5 bg-primary text-white rounded-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                      >
+                        {recoveringId === session.id ? 'Recovering...' : 'Recover'}
+                      </button>
+                      <button
+                        onClick={() => handleDiscard(session.id)}
+                        disabled={recoveringId !== null}
+                        className="text-xs uppercase tracking-wider px-3 py-1.5 text-text-muted hover:text-status-error transition-colors disabled:opacity-50"
+                      >
+                        Discard
+                      </button>
                     </div>
                   </div>
                 ))}
