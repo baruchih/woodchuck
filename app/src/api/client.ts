@@ -1,4 +1,4 @@
-import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult, SessionFilesData, FileContentData } from '../types';
+import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult, SessionFilesData, FileContentData, OrphanedSession } from '../types';
 
 const BASE_URL = '/api';
 
@@ -265,6 +265,20 @@ export const api = {
 
   deleteTemplate: (id: string): Promise<{ deleted: boolean }> =>
     request(`/templates/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+
+  // Orphaned session recovery
+  getOrphanedSessions: (): Promise<{ sessions: OrphanedSession[] }> =>
+    request('/sessions/orphaned'),
+
+  recoverSession: (id: string): Promise<{ session: Session }> =>
+    request(`/sessions/${encodeURIComponent(id)}/recover`, {
+      method: 'POST',
+    }),
+
+  discardOrphanedSession: (id: string): Promise<{ discarded: boolean }> =>
+    request(`/sessions/${encodeURIComponent(id)}/orphaned`, {
       method: 'DELETE',
     }),
 };

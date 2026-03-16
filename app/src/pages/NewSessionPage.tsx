@@ -7,6 +7,7 @@ import { Button } from '../components/Button';
 import { api } from '../api/client';
 import { getFolderName, truncatePath } from '../utils/path';
 import { useTemplates } from '../hooks/useTemplates';
+import type { OrphanedSession } from '../types';
 
 type Step = 'folder' | 'name';
 
@@ -23,12 +24,22 @@ export function NewSessionPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [orphanedSessions, setOrphanedSessions] = useState<OrphanedSession[]>([]);
+  const [recoveringId, setRecoveringId] = useState<string | null>(null);
+
   const { templates, refresh: refreshTemplates } = useTemplates();
 
   // Load templates on mount
   useEffect(() => {
     refreshTemplates();
   }, [refreshTemplates]);
+
+  // Fetch orphaned sessions on mount
+  useEffect(() => {
+    api.getOrphanedSessions().then(data => {
+      setOrphanedSessions(data.sessions);
+    }).catch(() => {});
+  }, []);
 
   // Handle folder from URL on mount (in case of direct navigation)
   useEffect(() => {
@@ -49,6 +60,28 @@ export function NewSessionPage() {
   const handleChangeFolder = useCallback(() => {
     setStep('folder');
     setError(null);
+  }, []);
+
+  const handleRecover = useCallback(async (id: string) => {
+    setRecoveringId(id);
+    try {
+      const data = await api.recoverSession(id);
+      navigate(`/session/${encodeURIComponent(data.session.id)}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Recovery failed';
+      setError(message);
+      setRecoveringId(null);
+    }
+  }, [navigate]);
+
+  const handleDiscard = useCallback(async (id: string) => {
+    try {
+      await api.discardOrphanedSession(id);
+      setOrphanedSessions(prev => prev.filter(s => s.id !== id));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to discard';
+      setError(message);
+    }
   }, []);
 
   const handleSelectTemplate = useCallback((template: { name: string; folder: string; prompt: string }) => {
@@ -97,6 +130,49 @@ export function NewSessionPage() {
               <div className="bg-status-error/10 border border-status-error rounded-sm p-4">
                 <p className="text-status-error text-xs">{error}</p>
               </div>
+            </div>
+          )}
+
+          {/* Orphaned sessions recovery section */}
+          {orphanedSessions.length > 0 && (
+            <div className="px-4 pt-4">
+              <label className="block text-text text-xs uppercase tracking-wider mb-2">
+                Recover Sessions
+              </label>
+              <div className="space-y-2 mb-4">
+                {orphanedSessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className="bg-surface border border-border rounded-sm p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-text text-sm font-medium truncate">{session.name}</div>
+                        <div className="text-text-muted text-xs font-mono mt-1 truncate">
+                          {truncatePath(session.folder, 40)}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                        <button
+                          onClick={() => handleRecover(session.id)}
+                          disabled={recoveringId !== null}
+                          className="text-xs uppercase tracking-wider px-3 py-1.5 bg-primary text-white rounded-sm hover:opacity-90 disabled:opacity-50 transition-opacity"
+                        >
+                          {recoveringId === session.id ? 'Recovering...' : 'Recover'}
+                        </button>
+                        <button
+                          onClick={() => handleDiscard(session.id)}
+                          disabled={recoveringId !== null}
+                          className="text-xs uppercase tracking-wider px-3 py-1.5 text-text-muted hover:text-status-error transition-colors disabled:opacity-50"
+                        >
+                          Discard
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-border my-4" />
             </div>
           )}
 

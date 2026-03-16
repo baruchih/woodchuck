@@ -14,6 +14,15 @@ export interface Session {
   tags?: string[];
 }
 
+export interface OrphanedSession {
+  id: string;
+  name: string;
+  folder: string;
+  status: string;
+  tags: string[];
+  last_input?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
