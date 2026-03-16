@@ -14,6 +14,8 @@ export interface XtermTerminalProps {
   onZoomOut: () => void;
   /** When true, tapping the terminal won't open the keyboard (mobile input bar handles input) */
   disableKeyboard?: boolean;
+  /** Increment to force a terminal refresh (resets stuck write state) */
+  refreshKey?: number;
   className?: string;
 }
 
@@ -27,9 +29,10 @@ export function XtermTerminal({
   onZoomIn,
   onZoomOut,
   disableKeyboard = false,
+  refreshKey = 0,
   className = '',
 }: XtermTerminalProps) {
-  const { containerRef, write, focus, scrollLines, getTextContent, dimensions } = useXterm({
+  const { containerRef, write, resetWriteState, focus, scrollLines, getTextContent, dimensions } = useXterm({
     fontSize,
     onInput,
     onResize,
@@ -41,10 +44,17 @@ export function XtermTerminal({
   const [selectViewportLine, setSelectViewportLine] = useState(0);
   const selectPreRef = useRef<HTMLPreElement>(null);
 
-  // Write content when it changes
+  // Reset xterm write state when refreshKey changes (user hit refresh)
+  useEffect(() => {
+    if (refreshKey > 0) {
+      resetWriteState();
+    }
+  }, [refreshKey, resetWriteState]);
+
+  // Write content when it changes (or after a refresh reset)
   useEffect(() => {
     write(content);
-  }, [content, write]);
+  }, [content, write, refreshKey]);
 
   // Touch handling: single-finger momentum scroll + two-finger pinch-to-zoom + long-press select
   useEffect(() => {

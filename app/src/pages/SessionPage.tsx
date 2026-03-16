@@ -57,8 +57,10 @@ export function SessionPage() {
   // Detect mobile (touch device with narrow screen)
   const isMobile = 'ontouchstart' in window && window.innerWidth < 768;
 
+  const [refreshKey, setRefreshKey] = useState(0);
+
   // Polling hook
-  const { content, needsAttention, contextActions, triggerFastPoll, notifySentText } = useTerminal({
+  const { content, needsAttention, contextActions, triggerFastPoll, notifySentText, forceRefresh } = useTerminal({
     sessionId: decodedId,
   });
 
@@ -321,6 +323,12 @@ export function SessionPage() {
     }
   }, [decodedId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
 
+  // Refresh terminal — resets stuck write state and re-fetches content via HTTP
+  const handleRefresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+    forceRefresh();
+  }, [forceRefresh]);
+
   const handleShowInfo = useCallback(() => {
     setShowInfoSheet(true);
   }, []);
@@ -435,6 +443,7 @@ export function SessionPage() {
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
             disableKeyboard={isMobile}
+            refreshKey={refreshKey}
           />
         </div>
 
@@ -449,6 +458,7 @@ export function SessionPage() {
           onUploadFiles={handleUploadFiles}
           onBrowseFiles={() => setShowFileBrowser(true)}
           onKillSession={() => setShowKillConfirm(true)}
+          onRefresh={handleRefresh}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           sending={sending}

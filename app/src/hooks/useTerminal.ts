@@ -16,6 +16,7 @@ interface UseTerminalReturn {
   status: string;
   triggerFastPoll: () => void;
   notifySentText: (text: string) => void;
+  forceRefresh: () => void;
 }
 
 // ── Constants ──
@@ -142,5 +143,11 @@ export function useTerminal({ sessionId }: UseTerminalParams): UseTerminalReturn
     }, ENTER_RETRY_DELAY_MS);
   }, [triggerFastPoll]);
 
-  return { content, needsAttention, contextActions, status, triggerFastPoll, notifySentText };
+  // Force refresh — resets content tracking so next poll always triggers a re-render
+  const forceRefresh = useCallback(() => {
+    lastContentRef.current = '';
+    poll();
+  }, [poll]);
+
+  return { content, needsAttention, contextActions, status, triggerFastPoll, notifySentText, forceRefresh };
 }

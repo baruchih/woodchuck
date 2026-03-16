@@ -15,6 +15,7 @@ interface UseXtermParams {
 interface UseXtermReturn {
   containerRef: React.RefObject<HTMLDivElement>;
   write: (content: string) => void;
+  resetWriteState: () => void;
   focus: () => void;
   blur: () => void;
   scrollLines: (n: number) => void;
@@ -265,6 +266,14 @@ export function useXterm({
     doTerminalWrite(terminal, content, lastContentRef, pendingContentRef, writingRef);
   }, []);
 
+  // Reset internal write state — unsticks writingRef and clears content tracking
+  // so the next write() call will force a full rewrite
+  const resetWriteState = useCallback(() => {
+    writingRef.current = false;
+    lastContentRef.current = '';
+    pendingContentRef.current = null;
+  }, []);
+
   // Focus terminal
   const focus = useCallback(() => {
     terminalRef.current?.focus();
@@ -299,6 +308,7 @@ export function useXterm({
   return {
     containerRef,
     write,
+    resetWriteState,
     focus,
     blur,
     scrollLines,
