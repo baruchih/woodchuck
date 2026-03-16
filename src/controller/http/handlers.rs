@@ -13,11 +13,12 @@ use tracing::{debug, info, instrument, warn};
 
 use super::response::{
     err, err_msg, ApiResponse, CommandsData, DeployAbortData, DeployStatusData, DeployTriggerData,
-    FileEntry, FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData, InputSentData,
-    MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
-    ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData, SessionCreatedData,
-    SessionData, SessionFilesData, SessionKilledData, SessionUpdatedData, SessionsData, TemplateData,
-    TemplateDeletedData, TemplatesListData, UploadProjectData, UploadedFilesData, UploadedImageData, VapidKeyData,
+    FileContentData, FileEntry, FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData,
+    InputSentData, MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData,
+    ProjectRenamedData, ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData,
+    SessionCreatedData, SessionData, SessionFilesData, SessionKilledData, SessionUpdatedData,
+    SessionsData, TemplateData, TemplateDeletedData, TemplatesListData, UploadProjectData,
+    UploadedFilesData, UploadedImageData, VapidKeyData,
 };
 use super::state::AppState;
 
@@ -1350,6 +1351,80 @@ pub async fn download_file_handler(
         ],
         file_bytes,
     ))
+}
+
+/// Max file size for in-browser viewing (2 MB)
+const MAX_VIEW_SIZE: u64 = 2 * 1024 * 1024;
+
+/// GET /sessions/:id/file-content?path=relative/path — read file content for in-browser viewing
+#[instrument(skip(state))]
+pub async fn file_content_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+) -> ApiResult<FileContentData> {
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+
+    let root = std::path::PathBuf::from(&session.folder);
+    if !root.is_dir() {
+        return Err(err_msg(StatusCode::NOT_FOUND, "Session folder not found", "FOLDER_NOT_FOUND"));
+    }
+
+    // Resolve and canonicalize to prevent path traversal
+    let requested = root.join(&query.path);
+    let canonical = requested.canonicalize().map_err(|_| {
+        err_msg(StatusCode::NOT_FOUND, "File not found", "FILE_NOT_FOUND")
+    })?;
+    let canonical_root = root.canonicalize().map_err(|_| {
+        err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Could not resolve folder", "IO_ERROR")
+    })?;
+
+    if !canonical.starts_with(&canonical_root) {
+        return Err(err_msg(StatusCode::FORBIDDEN, "Path outside session folder", "FORBIDDEN"));
+    }
+
+    if canonical.is_dir() {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Cannot view a directory", "INVALID_INPUT"));
+    }
+
+    // Check file size before reading
+    let metadata = tokio::fs::metadata(&canonical).await.map_err(|_| {
+        err_msg(StatusCode::NOT_FOUND, "File not found", "FILE_NOT_FOUND")
+    })?;
+
+    if metadata.len() > MAX_VIEW_SIZE {
+        return Err(err_msg(
+            StatusCode::BAD_REQUEST,
+            "File too large to view (max 2 MB)",
+            "FILE_TOO_LARGE",
+        ));
+    }
+
+    let file_bytes = tokio::fs::read(&canonical).await.map_err(|_| {
+        err_msg(StatusCode::NOT_FOUND, "File not found", "FILE_NOT_FOUND")
+    })?;
+
+    // Try to interpret as UTF-8 text
+    let content = String::from_utf8(file_bytes).map_err(|_| {
+        err_msg(StatusCode::BAD_REQUEST, "File is not valid text", "BINARY_FILE")
+    })?;
+
+    let file_name = canonical
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    debug!(session = %session_id, path = %query.path, size = metadata.len(), "Serving file content");
+
+    Ok(ApiResponse::ok(FileContentData {
+        name: file_name,
+        path: query.path,
+        content,
+        size: metadata.len(),
+    }))
 }
 
 /// DELETE /projects/:id - Delete a project (sessions become ungrouped)

@@ -198,6 +198,13 @@ export interface SessionFilesData {
   files: FileEntry[];
 }
 
+export interface FileContentData {
+  name: string;
+  path: string;
+  content: string;
+  size: number;
+}
+
 export interface PushSubscriptionKeys {
   p256dh: string;
   auth: string;

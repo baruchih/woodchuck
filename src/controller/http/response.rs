@@ -373,6 +373,15 @@ pub struct SessionFilesData {
     pub files: Vec<FileEntry>,
 }
 
+/// File content response (for in-browser viewing)
+#[derive(Debug, Serialize)]
+pub struct FileContentData {
+    pub name: String,
+    pub path: String,
+    pub content: String,
+    pub size: u64,
+}
+
 // =============================================================================
 // IntoResponse Implementation
 // =============================================================================
