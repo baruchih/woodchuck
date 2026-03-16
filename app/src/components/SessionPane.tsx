@@ -18,12 +18,13 @@ interface SessionPaneProps {
 export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove }: SessionPaneProps) {
   const { sendInput, uploadFiles } = useSessions();
   const { resize, sendRawInput } = useWS();
-  const { content, needsAttention, triggerFastPoll, notifySentText } = useTerminal({ sessionId });
+  const { content, needsAttention, triggerFastPoll, notifySentText, forceRefresh } = useTerminal({ sessionId });
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
   const { uploadStatus, setUploading, setUploadProgress, setUploadResult } = useUploadStatus();
   const [showFileBrowser, setShowFileBrowser] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
 
@@ -59,6 +60,20 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       handleSend();
     }
   }, [handleSend]);
+
+  const handleSendKey = useCallback(async (key: string) => {
+    try {
+      await sendInput(sessionId, key);
+      triggerFastPoll();
+    } catch (err) {
+      console.error('Failed to send key:', err);
+    }
+  }, [sessionId, sendInput, triggerFastPoll]);
+
+  const handleRefresh = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+    forceRefresh();
+  }, [forceRefresh]);
 
   const handleUploadFiles = useCallback(() => {
     filesInputRef.current?.click();
@@ -131,11 +146,22 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           disableKeyboard={!focused}
+          refreshKey={refreshKey}
         />
       </div>
 
       {/* Upload status */}
       <UploadStatus state={uploadStatus} compact />
+
+      {/* Action toolbar */}
+      <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-surface border-t border-border/50 overflow-x-auto shrink-0">
+        <PaneAction label="Enter" onClick={() => handleSendKey('Enter')} />
+        <PaneAction label="Esc" onClick={() => handleSendKey('Escape')} />
+        <PaneAction label="C-b" onClick={() => handleSendKey('C-b')} />
+        <PaneAction label="Tab" onClick={() => handleSendKey('Tab')} />
+        <PaneAction label="Dir" onClick={() => setShowFileBrowser(true)} />
+        <PaneAction label="Ref" onClick={handleRefresh} />
+      </div>
 
       {/* Compact input bar */}
       <div className="flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
@@ -189,5 +215,18 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         />
       )}
     </div>
+  );
+}
+
+// Compact action button for pane toolbar
+function PaneAction({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="px-1.5 py-0.5 rounded border border-border text-[9px] font-bold uppercase tracking-wide text-text-muted shrink-0 hover:text-text hover:border-text-muted"
+    >
+      {label}
+    </button>
   );
 }
