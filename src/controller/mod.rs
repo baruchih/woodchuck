@@ -54,8 +54,8 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
         }
     };
 
-    // Discover existing tmux sessions and restore persisted names
-    initialize_session_states(&tmux, &session_states, &session_store).await?;
+    // Discover existing tmux sessions, restore persisted names, and recover orphaned sessions
+    initialize_session_states(&config, &tmux, &session_states, &session_store).await?;
 
     // Create inbox directory
     let inbox_path = maintainer::inbox_dir(&config.data_dir);
@@ -177,16 +177,32 @@ async fn start_maintainer(
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| config.projects_dir.clone());
 
-        // Create the maintainer session
-        let cmd = "claude --dangerously-skip-permissions";
+        // Check if we're recovering from a crash (session was previously tracked)
+        let was_previously_tracked = match session_store.load().await {
+            Ok(states) => states.contains_key(session_id),
+            Err(_) => false,
+        };
+
+        // Use --continue when recovering to restore Claude's conversation context
+        let cmd = if was_previously_tracked {
+            "claude --continue --dangerously-skip-permissions"
+        } else {
+            "claude --dangerously-skip-permissions"
+        };
+
         match tmux.new_session(session_id, &repo_dir, cmd).await {
             Ok(()) => {
-                info!("Created maintainer session");
+                if was_previously_tracked {
+                    info!("Recovered maintainer session with --continue");
+                } else {
+                    info!("Created maintainer session");
+                }
 
                 // Track in session states
                 let mut states = session_states.write().await;
                 let mut state = SessionState::with_name("Woodchuck Maintainer".to_string());
                 state.is_maintainer = true;
+                state.folder = Some(repo_dir.clone());
                 states.insert(session_id.to_string(), state);
 
                 // Persist
@@ -199,6 +215,7 @@ async fn start_maintainer(
                     last_input: None,
                     tags: Vec::new(),
                     last_notified_status: None,
+                    folder: Some(repo_dir),
                 };
                 let store = session_store.clone();
                 let sid = session_id.to_string();
@@ -286,8 +303,10 @@ async fn start_maintainer(
 
 /// Initialize session states from existing tmux sessions
 ///
-/// Restores persisted session state (name, status, timing) and prunes orphaned entries.
+/// Restores persisted session state (name, status, timing) for live sessions.
+/// Recovers orphaned sessions (persisted but tmux dead) by respawning with `claude --continue`.
 async fn initialize_session_states(
+    config: &Arc<Config>,
     tmux: &Arc<dyn TmuxClient>,
     session_states: &SharedSessionStates,
     session_store: &Arc<dyn SessionStore>,
@@ -306,12 +325,11 @@ async fn initialize_session_states(
     let mut states = session_states.write().await;
     let mut active_ids = Vec::with_capacity(sessions.len());
 
-    for session in sessions {
+    for session in &sessions {
         active_ids.push(session.id.clone());
 
         // Restore persisted state if available
-        let state = if let Some(persisted) = persisted_states.get(&session.id) {
-            // Restore full state from persisted data
+        let mut state = if let Some(persisted) = persisted_states.get(&session.id) {
             SessionState::from_persisted(persisted.clone())
         } else {
             // No persisted state — session existed before persistence or store
@@ -321,12 +339,60 @@ async fn initialize_session_states(
             state.last_notified_status = Some(state.status);
             state
         };
+        // Always update folder from live tmux data (most reliable source)
+        state.folder = Some(session.folder.clone());
         states.insert(session.id.clone(), state);
     }
 
-    info!(count = states.len(), "Initialized session states");
+    info!(count = states.len(), "Initialized live session states");
 
-    // Prune orphaned sessions (non-fatal)
+    // Recover orphaned sessions: persisted in store but no longer in tmux
+    // (e.g. after a power outage or crash). Skip the maintainer — it's
+    // handled separately in start_maintainer().
+    let orphaned: Vec<_> = persisted_states.iter()
+        .filter(|(id, _)| {
+            !active_ids.contains(id) && id.as_str() != maintainer::MAINTAINER_SESSION_ID
+        })
+        .collect();
+
+    if !orphaned.is_empty() {
+        info!(count = orphaned.len(), "Found orphaned sessions, attempting recovery");
+    }
+
+    for (session_id, persisted) in orphaned {
+        if let Some(folder) = &persisted.folder {
+            if !std::path::Path::new(folder).is_dir() {
+                warn!(session = %session_id, folder = %folder, "Cannot recover session: folder no longer exists");
+                continue;
+            }
+
+            // Respawn tmux session with claude --continue to restore conversation context
+            let cmd = "claude --continue";
+            match tmux.new_session(session_id, folder, cmd).await {
+                Ok(()) => {
+                    let mut state = SessionState::from_persisted(persisted.clone());
+                    state.status = crate::model::SessionStatus::Working;
+                    state.working_since = Some(chrono::Utc::now());
+                    states.insert(session_id.clone(), state);
+                    active_ids.push(session_id.clone());
+
+                    // Re-inject hooks (non-fatal)
+                    if let Err(e) = crate::utils::inject_hooks(session_id, folder, &config.external_url).await {
+                        warn!(session = %session_id, error = %e, "Hook re-injection failed during recovery");
+                    }
+
+                    info!(session = %session_id, folder = %folder, "Recovered session with claude --continue");
+                }
+                Err(e) => {
+                    warn!(session = %session_id, error = %e, "Failed to recover session");
+                }
+            }
+        } else {
+            warn!(session = %session_id, name = %persisted.name, "Cannot recover session: no folder path persisted (pre-recovery sessions)");
+        }
+    }
+
+    // Prune sessions that are neither live nor recovered (non-fatal)
     if let Err(e) = session_store.prune(&active_ids).await {
         tracing::warn!(error = %e, "Failed to prune orphaned sessions");
     }

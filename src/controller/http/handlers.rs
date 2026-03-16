@@ -149,7 +149,7 @@ pub async fn create_session_handler(
         .await
         .map_err(err)?;
 
-    state.track_session(&session.id, &session.name).await;
+    state.track_session(&session.id, &session.name, &session.folder).await;
 
     // Inject Claude Code hooks into the project folder (non-fatal if fails)
     if let Err(e) = crate::utils::inject_hooks(&session.id, &session.folder, &state.config.external_url).await {
@@ -157,7 +157,8 @@ pub async fn create_session_handler(
     }
 
     // Persist session state (non-fatal if fails)
-    let persisted_state = crate::utils::PersistedSessionState::with_name(session.name.clone());
+    let mut persisted_state = crate::utils::PersistedSessionState::with_name(session.name.clone());
+    persisted_state.folder = Some(session.folder.clone());
     if let Err(e) = state.session_store.save(&session.id, &persisted_state).await {
         warn!(session = %session.id, error = %e, "Failed to persist session state");
     }

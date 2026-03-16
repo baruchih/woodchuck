@@ -114,9 +114,11 @@ impl AppState {
     }
 
     /// Track a new session in the shared state map
-    pub async fn track_session(&self, session_id: &str, session_name: &str) {
+    pub async fn track_session(&self, session_id: &str, session_name: &str, folder: &str) {
         let mut states = self.session_states.write().await;
-        states.insert(session_id.to_string(), crate::model::SessionState::with_name(session_name.to_string()));
+        let mut state = crate::model::SessionState::with_name(session_name.to_string());
+        state.folder = Some(folder.to_string());
+        states.insert(session_id.to_string(), state);
     }
 
     /// Remove a session from the shared state map

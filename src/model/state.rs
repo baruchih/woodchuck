@@ -48,6 +48,9 @@ pub struct SessionState {
     /// User-assigned tags for filtering/grouping
     pub tags: Vec<String>,
 
+    /// Project folder path (for recovery after crash)
+    pub folder: Option<String>,
+
     /// Whether this is the maintainer session (hidden from main list)
     pub is_maintainer: bool,
 
@@ -71,6 +74,7 @@ impl Default for SessionState {
             project_id: None,
             last_input: None,
             tags: Vec::new(),
+            folder: None,
             is_maintainer: false,
             last_notified_status: None,
             status_stable_since: None,
@@ -106,6 +110,7 @@ impl SessionState {
             project_id: persisted.project_id,
             last_input: persisted.last_input,
             tags: persisted.tags,
+            folder: persisted.folder,
             last_notified_status,
             ..Self::default()
         }
@@ -122,6 +127,7 @@ impl SessionState {
             last_input: self.last_input.clone(),
             tags: self.tags.clone(),
             last_notified_status: self.last_notified_status,
+            folder: self.folder.clone(),
         }
     }
 

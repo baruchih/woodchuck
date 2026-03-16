@@ -66,6 +66,10 @@ pub struct PersistedSessionState {
     /// Last status for which a push notification was sent (deduplication)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_notified_status: Option<SessionStatus>,
+
+    /// Project folder path (needed for session recovery after crash/power outage)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 /// Persisted project state (stored to disk)
@@ -620,6 +624,7 @@ mod tests {
             last_input: None,
             tags: Vec::new(),
             last_notified_status: None,
+            folder: None,
         };
         let state2 = PersistedSessionState::with_name("Second Session".to_string());
 
@@ -710,6 +715,7 @@ mod tests {
                 last_input: None,
                 tags: Vec::new(),
                 last_notified_status: None,
+                folder: None,
             };
             store.save("persistent-1", &state).await.unwrap();
         }
