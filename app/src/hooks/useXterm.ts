@@ -51,6 +51,33 @@ const XTERM_THEME = {
   brightWhite: '#ffffff',
 };
 
+// ── Internal write helper (not a hook — plain function for recursive use) ──
+
+/** Write content to the terminal, clearing scrollback first. After the write
+ *  completes, automatically flushes any content that arrived during the write. */
+function doTerminalWrite(
+  terminal: Terminal,
+  content: string,
+  lastContentRef: React.MutableRefObject<string>,
+  pendingContentRef: React.MutableRefObject<string | null>,
+  writingRef: React.MutableRefObject<boolean>,
+) {
+  lastContentRef.current = content;
+  pendingContentRef.current = null;
+  writingRef.current = true;
+
+  terminal.write('\x1b[3J\x1b[H\x1b[J' + content, () => {
+    terminal.scrollToBottom();
+    writingRef.current = false;
+
+    // Flush any content that arrived while this write was in progress
+    const pending = pendingContentRef.current;
+    if (pending !== null && pending !== lastContentRef.current) {
+      doTerminalWrite(terminal, pending, lastContentRef, pendingContentRef, writingRef);
+    }
+  });
+}
+
 // ── Hook ──
 
 export function useXterm({
@@ -136,14 +163,7 @@ export function useXterm({
       const isAtBottom = viewport.baseY <= viewport.viewportY;
 
       if (isAtBottom && pendingContentRef.current !== null) {
-        const pending = pendingContentRef.current;
-        pendingContentRef.current = null;
-        lastContentRef.current = pending;
-        writingRef.current = true;
-        terminal.write('\x1b[3J\x1b[H\x1b[J' + pending, () => {
-          terminal.scrollToBottom();
-          writingRef.current = false;
-        });
+        doTerminalWrite(terminal, pendingContentRef.current, lastContentRef, pendingContentRef, writingRef);
       }
     });
 
@@ -224,8 +244,16 @@ export function useXterm({
     // Skip if content unchanged
     if (content === lastContentRef.current) return;
 
-    // Check actual scroll position — don't rely on stale ref state.
-    // If user is scrolled up, stash the content for later.
+    // If a write is in progress, queue this content — it will be flushed
+    // when the current write's callback fires. This prevents checking
+    // isAtBottom during a write (when the buffer is in an intermediate
+    // state and baseY > viewportY even though the user didn't scroll).
+    if (writingRef.current) {
+      pendingContentRef.current = content;
+      return;
+    }
+
+    // Check actual scroll position — if user scrolled up, defer
     const viewport = terminal.buffer.active;
     const isAtBottom = viewport.baseY <= viewport.viewportY;
 
@@ -234,18 +262,7 @@ export function useXterm({
       return;
     }
 
-    lastContentRef.current = content;
-
-    // Clear scrollback (\x1b[3J) before each rewrite to prevent accumulation
-    // of duplicate screens. Then move home (\x1b[H) and clear display (\x1b[J).
-    // The current write's content can still extend below the viewport into
-    // scrollback, which is preserved as long as the user doesn't trigger
-    // another write (deferred writes protect scrolled-up users).
-    writingRef.current = true;
-    terminal.write('\x1b[3J\x1b[H\x1b[J' + content, () => {
-      terminal.scrollToBottom();
-      writingRef.current = false;
-    });
+    doTerminalWrite(terminal, content, lastContentRef, pendingContentRef, writingRef);
   }, []);
 
   // Focus terminal
