@@ -153,7 +153,8 @@ impl AppState {
             let now = Utc::now();
             if new_status == SessionStatus::Working {
                 state.last_working_at = Some(now);
-                state.last_notified_status = None; // Reset so next transition will notify
+                // Note: last_notified_status is NOT reset here. The poller
+                // clears it when it observes Working→done transitions.
                 if state.working_since.is_none() {
                     state.working_since = Some(now);
                 }

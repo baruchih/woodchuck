@@ -94,10 +94,10 @@ impl SessionState {
 
     /// Create session state from persisted data
     pub fn from_persisted(persisted: PersistedSessionState) -> Self {
-        // Pre-set last_notified_status to the restored status so the poller
-        // doesn't re-notify for sessions that were already in this state
-        // before the server restarted.
-        let last_notified_status = Some(persisted.status);
+        // Restore last_notified_status from persisted data if available,
+        // otherwise fall back to the persisted session status so the poller
+        // doesn't re-notify for sessions that were already in this state.
+        let last_notified_status = persisted.last_notified_status.or(Some(persisted.status));
         Self {
             name: persisted.name,
             status: persisted.status,
@@ -121,6 +121,7 @@ impl SessionState {
             project_id: self.project_id.clone(),
             last_input: self.last_input.clone(),
             tags: self.tags.clone(),
+            last_notified_status: self.last_notified_status,
         }
     }
 
@@ -173,7 +174,10 @@ impl SessionState {
         if new_status == SessionStatus::Working {
             // Entering or continuing Working state
             self.last_working_at = Some(now);
-            self.last_notified_status = None; // Reset so next transition will notify
+            // Note: last_notified_status is NOT reset here. The poller handles
+            // notification dedup and only clears it when it observes a genuine
+            // Working→done transition. This prevents spurious notifications
+            // after server restarts or brief status flickers.
             if self.working_since.is_none() {
                 self.working_since = Some(now);
             }

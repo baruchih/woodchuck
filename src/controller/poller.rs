@@ -281,6 +281,19 @@ async fn poll_session(
         }
     }
 
+    // If the session just stopped working, allow the next notification.
+    // This is the ONLY place last_notified_status gets cleared, ensuring
+    // notifications only fire after genuine Working→done transitions
+    // (not after server restarts or brief status flickers).
+    if let Some(ref change) = change {
+        if change.status_changed && change.old_status == SessionStatus::Working {
+            let mut states = session_states.write().await;
+            if let Some(state) = states.get_mut(session_id) {
+                state.last_notified_status = None;
+            }
+        }
+    }
+
     // ── Push notifications ──
     // Runs on EVERY poll (not just output changes) so the Resting debounce
     // can fire after the required stability period even if output is static.
@@ -321,6 +334,25 @@ async fn poll_session(
         };
 
         if should_notify {
+            // Persist the updated last_notified_status so it survives restarts
+            {
+                let states = session_states.read().await;
+                if let Some(state) = states.get(session_id) {
+                    let persisted = state.to_persisted();
+                    let store = session_store.clone();
+                    let sid = session_id.to_string();
+                    let permit = bg_semaphore.clone().try_acquire_owned();
+                    if let Ok(permit) = permit {
+                        tokio::spawn(async move {
+                            if let Err(e) = store.save(&sid, &persisted).await {
+                                warn!(session = %sid, error = %e, "Failed to persist notification state");
+                            }
+                            drop(permit);
+                        });
+                    }
+                }
+            }
+
             // Send ntfy notification (with semaphore to limit concurrency)
             let ntfy = ntfy.clone();
             let sid = session_id.to_string();

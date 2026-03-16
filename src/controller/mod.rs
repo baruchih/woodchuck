@@ -198,6 +198,7 @@ async fn start_maintainer(
                     project_id: None,
                     last_input: None,
                     tags: Vec::new(),
+                    last_notified_status: None,
                 };
                 let store = session_store.clone();
                 let sid = session_id.to_string();
@@ -313,7 +314,12 @@ async fn initialize_session_states(
             // Restore full state from persisted data
             SessionState::from_persisted(persisted.clone())
         } else {
-            SessionState::new()
+            // No persisted state — session existed before persistence or store
+            // was lost. Pre-set last_notified_status to current status so the
+            // poller doesn't fire a spurious notification on the first poll.
+            let mut state = SessionState::new();
+            state.last_notified_status = Some(state.status);
+            state
         };
         states.insert(session.id.clone(), state);
     }

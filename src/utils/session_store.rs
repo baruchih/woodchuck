@@ -62,6 +62,10 @@ pub struct PersistedSessionState {
     /// User-assigned tags for filtering/grouping
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+
+    /// Last status for which a push notification was sent (deduplication)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_notified_status: Option<SessionStatus>,
 }
 
 /// Persisted project state (stored to disk)
@@ -615,6 +619,7 @@ mod tests {
             project_id: None,
             last_input: None,
             tags: Vec::new(),
+            last_notified_status: None,
         };
         let state2 = PersistedSessionState::with_name("Second Session".to_string());
 
@@ -704,6 +709,7 @@ mod tests {
                 project_id: None,
                 last_input: None,
                 tags: Vec::new(),
+                last_notified_status: None,
             };
             store.save("persistent-1", &state).await.unwrap();
         }

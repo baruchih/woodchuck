@@ -63,7 +63,6 @@ export function useXterm({
   const fitAddonRef = useRef<FitAddon | null>(null);
   const lastContentRef = useRef<string>('');
   const pendingContentRef = useRef<string | null>(null);
-  const userScrolledRef = useRef(false);
   const writingRef = useRef(false); // true while we're writing content (ignore scroll events)
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
@@ -128,24 +127,22 @@ export function useXterm({
       onInputRef.current(data);
     });
 
-    // Track user scroll position to avoid overwriting while scrolled up
+    // When user scrolls back to bottom, flush any pending (deferred) content
     const scrollDisposable = terminal.onScroll(() => {
       // Ignore scroll events caused by our own writes
       if (writingRef.current) return;
 
       const viewport = terminal.buffer.active;
       const isAtBottom = viewport.baseY <= viewport.viewportY;
-      userScrolledRef.current = !isAtBottom;
 
-      // If user scrolled back to bottom, flush any pending content
       if (isAtBottom && pendingContentRef.current !== null) {
         const pending = pendingContentRef.current;
         pendingContentRef.current = null;
         lastContentRef.current = pending;
         writingRef.current = true;
-        terminal.write('\x1b[H\x1b[J' + pending, () => {
-          writingRef.current = false;
+        terminal.write('\x1b[3J\x1b[H\x1b[J' + pending, () => {
           terminal.scrollToBottom();
+          writingRef.current = false;
         });
       }
     });
@@ -227,28 +224,27 @@ export function useXterm({
     // Skip if content unchanged
     if (content === lastContentRef.current) return;
 
-    // If user is scrolled up, stash the content for later
-    if (userScrolledRef.current) {
+    // Check actual scroll position — don't rely on stale ref state.
+    // If user is scrolled up, stash the content for later.
+    const viewport = terminal.buffer.active;
+    const isAtBottom = viewport.baseY <= viewport.viewportY;
+
+    if (!isAtBottom) {
       pendingContentRef.current = content;
       return;
     }
 
     lastContentRef.current = content;
 
-    // Check if user is at the bottom BEFORE we write — only auto-scroll
-    // back to bottom after the write if they were already there.
-    const viewport = terminal.buffer.active;
-    const wasAtBottom = viewport.baseY <= viewport.viewportY;
-
-    // Move cursor to home position and clear from cursor to end of screen,
-    // then write content. Using ED(0) instead of ED(2) preserves scrollback
-    // so the user can scroll up through history.
+    // Clear scrollback (\x1b[3J) before each rewrite to prevent accumulation
+    // of duplicate screens. Then move home (\x1b[H) and clear display (\x1b[J).
+    // The current write's content can still extend below the viewport into
+    // scrollback, which is preserved as long as the user doesn't trigger
+    // another write (deferred writes protect scrolled-up users).
     writingRef.current = true;
-    terminal.write('\x1b[H\x1b[J' + content, () => {
+    terminal.write('\x1b[3J\x1b[H\x1b[J' + content, () => {
+      terminal.scrollToBottom();
       writingRef.current = false;
-      if (wasAtBottom) {
-        terminal.scrollToBottom();
-      }
     });
   }, []);
 
