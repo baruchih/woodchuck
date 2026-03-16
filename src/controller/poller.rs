@@ -174,7 +174,7 @@ pub fn start_poller(
 
             // Check for dead sessions less frequently (~every 5 seconds)
             if tick_count.is_multiple_of(cleanup_every) {
-                cleanup_dead_sessions(&tmux, &session_states, &subscribers).await;
+                cleanup_dead_sessions(&tmux, &session_states, &subscribers, &session_store).await;
                 cleanup_empty_subscribers(&subscribers).await;
             }
         }
@@ -432,6 +432,7 @@ async fn cleanup_dead_sessions(
     tmux: &Arc<dyn TmuxClient>,
     session_states: &SharedSessionStates,
     subscribers: &SubscriberMap,
+    session_store: &Arc<dyn SessionStore>,
 ) {
     let tracked_ids: Vec<String> = {
         let states = session_states.read().await;
@@ -461,6 +462,11 @@ async fn cleanup_dead_sessions(
                 {
                     let mut states = session_states.write().await;
                     states.remove(&session_id);
+                }
+
+                // Remove from persistent store (normal shutdown — not a crash orphan)
+                if let Err(e) = session_store.remove(&session_id).await {
+                    warn!(session = %session_id, error = %e, "Failed to remove ended session from store");
                 }
 
                 info!(session = %session_id, "Session ended, removed from tracking");

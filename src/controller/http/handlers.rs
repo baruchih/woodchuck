@@ -13,9 +13,10 @@ use tracing::{debug, info, instrument, warn};
 
 use super::response::{
     err, err_msg, ApiResponse, CommandsData, DeployAbortData, DeployStatusData, DeployTriggerData,
-    FileContentData, FileEntry, FolderCreatedData, FoldersData, HealthData, HookData, InboxItemData,
-    InputSentData, MaintainerStatusData, PollData, ProjectCreatedData, ProjectDeletedData,
-    ProjectRenamedData, ProjectsData, PushSubscribedData, PushUnsubscribedData, ResizeData,
+    DiscardedSessionData, FileContentData, FileEntry, FolderCreatedData, FoldersData, HealthData,
+    HookData, InboxItemData, InputSentData, MaintainerStatusData, OrphanedSessionData,
+    OrphanedSessionsData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
+    ProjectsData, PushSubscribedData, PushUnsubscribedData, RecoveredSessionData, ResizeData,
     SessionCreatedData, SessionData, SessionFilesData, SessionKilledData, SessionUpdatedData,
     SessionsData, TemplateData, TemplateDeletedData, TemplatesListData, UploadProjectData,
     UploadedFilesData, UploadedImageData, VapidKeyData,
@@ -1455,4 +1456,127 @@ pub async fn delete_project_handler(
 
     info!(project_id = %project_id, "Deleted project");
     Ok(ApiResponse::ok(ProjectDeletedData { deleted: true }))
+}
+
+// =============================================================================
+// Orphaned Session Handlers
+// =============================================================================
+
+/// GET /sessions/orphaned - List recoverable orphaned sessions
+#[instrument(skip(state))]
+pub async fn list_orphaned_handler(
+    State(state): State<AppState>,
+) -> ApiResult<OrphanedSessionsData> {
+    // Load persisted states
+    let persisted = state.session_store.load().await.map_err(err)?;
+
+    // Get live tmux session IDs
+    let live_sessions = crate::model::list_sessions(state.tmux.as_ref()).await.map_err(err)?;
+    let live_ids: std::collections::HashSet<String> = live_sessions.iter().map(|s| s.id.clone()).collect();
+
+    // Find orphaned: in store but not in tmux, has folder, not maintainer
+    let orphaned: Vec<OrphanedSessionData> = persisted.into_iter()
+        .filter(|(id, ps)| {
+            !live_ids.contains(id)
+                && ps.folder.is_some()
+                && id.as_str() != crate::controller::maintainer::MAINTAINER_SESSION_ID
+        })
+        .map(|(id, ps)| OrphanedSessionData {
+            id,
+            name: ps.name,
+            folder: ps.folder.unwrap_or_default(),
+            status: format!("{}", ps.status),
+            tags: ps.tags,
+            last_input: ps.last_input,
+        })
+        .collect();
+
+    Ok(ApiResponse::ok(OrphanedSessionsData { sessions: orphaned }))
+}
+
+/// POST /sessions/:id/recover - Recover an orphaned session with claude --continue
+#[instrument(skip(state))]
+pub async fn recover_session_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> ApiResultCreated<RecoveredSessionData> {
+    // Load the persisted state for this session
+    let persisted_states = state.session_store.load().await.map_err(err)?;
+    let persisted = persisted_states.get(&session_id)
+        .ok_or_else(|| err_msg(StatusCode::NOT_FOUND, "Orphaned session not found", "SESSION_NOT_FOUND"))?;
+
+    let folder = persisted.folder.as_ref()
+        .ok_or_else(|| err_msg(StatusCode::BAD_REQUEST, "Session has no folder path, cannot recover", "INVALID_INPUT"))?;
+
+    // Verify folder exists
+    if !std::path::Path::new(folder).is_dir() {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Session folder no longer exists", "FOLDER_NOT_FOUND"));
+    }
+
+    // Check it's not already alive in tmux
+    if state.tmux.has_session(&session_id).await.map_err(err)? {
+        return Err(err_msg(StatusCode::CONFLICT, "Session is already running", "SESSION_ALREADY_EXISTS"));
+    }
+
+    // Respawn tmux session with claude --continue
+    let cmd = "claude --continue";
+    state.tmux.new_session(&session_id, folder, cmd).await.map_err(err)?;
+
+    // Track in session states
+    let mut ss = crate::model::SessionState::from_persisted(persisted.clone());
+    ss.status = crate::model::SessionStatus::Working;
+    ss.working_since = Some(chrono::Utc::now());
+    {
+        let mut states = state.session_states.write().await;
+        states.insert(session_id.clone(), ss);
+    }
+
+    // Re-inject hooks (non-fatal)
+    if let Err(e) = crate::utils::inject_hooks(&session_id, folder, &state.config.external_url).await {
+        warn!(session = %session_id, error = %e, "Hook re-injection failed during recovery");
+    }
+
+    // Update persisted state
+    {
+        let states = state.session_states.read().await;
+        if let Some(s) = states.get(&session_id) {
+            let p = s.to_persisted();
+            if let Err(e) = state.session_store.save(&session_id, &p).await {
+                warn!(session = %session_id, error = %e, "Failed to persist recovered state");
+            }
+        }
+    }
+
+    // Get the session info for the response
+    let git_branch = crate::utils::detect_git_branch(folder).await;
+    let now = chrono::Utc::now();
+    let session = crate::model::types::Session {
+        id: session_id.clone(),
+        name: persisted.name.clone(),
+        folder: folder.clone(),
+        git_branch,
+        status: crate::model::SessionStatus::Working,
+        created_at: now,
+        updated_at: now,
+        working_since: Some(now),
+        project_id: persisted.project_id.clone(),
+        last_input: persisted.last_input.clone(),
+        tags: persisted.tags.clone(),
+    };
+
+    info!(session = %session_id, folder = %folder, "Recovered orphaned session");
+    Ok((StatusCode::CREATED, ApiResponse::ok(RecoveredSessionData { session })))
+}
+
+/// DELETE /sessions/:id/orphaned - Discard an orphaned session
+#[instrument(skip(state))]
+pub async fn discard_orphaned_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> ApiResult<DiscardedSessionData> {
+    // Remove from persistent store
+    state.session_store.remove(&session_id).await.map_err(err)?;
+
+    info!(session = %session_id, "Discarded orphaned session");
+    Ok(ApiResponse::ok(DiscardedSessionData { discarded: true }))
 }

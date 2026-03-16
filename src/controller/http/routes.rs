@@ -17,15 +17,15 @@ use super::handlers::{
     create_folder_handler, create_project_handler, create_session_handler,
     create_template_handler, delete_project_handler, delete_session_handler,
     delete_template_handler, deploy_abort_handler, deploy_rollback_handler,
-    deploy_status_handler, deploy_trigger_handler, download_file_handler,
-    file_content_handler, get_session_handler, health_handler, hook_handler,
-    list_commands_handler, list_folders_handler, list_projects_handler,
-    list_sessions_handler, list_templates_handler, maintainer_inbox_handler,
-    maintainer_pause_handler, maintainer_resume_handler, maintainer_status_handler,
-    poll_handler, push_subscribe_handler, push_unsubscribe_handler,
-    rename_project_handler, resize_handler, send_input_handler, session_files_handler,
-    update_session_handler, upload_files_handler, upload_image_handler,
-    upload_project_handler, vapid_key_handler,
+    deploy_status_handler, deploy_trigger_handler, discard_orphaned_handler,
+    download_file_handler, file_content_handler, get_session_handler, health_handler,
+    hook_handler, list_commands_handler, list_folders_handler, list_orphaned_handler,
+    list_projects_handler, list_sessions_handler, list_templates_handler,
+    maintainer_inbox_handler, maintainer_pause_handler, maintainer_resume_handler,
+    maintainer_status_handler, poll_handler, push_subscribe_handler,
+    push_unsubscribe_handler, recover_session_handler, rename_project_handler,
+    resize_handler, send_input_handler, session_files_handler, update_session_handler,
+    upload_files_handler, upload_image_handler, upload_project_handler, vapid_key_handler,
 };
 use super::rate_limit::{RateLimiter, rate_limit_middleware};
 use super::state::AppState;
@@ -40,6 +40,7 @@ pub fn build_router(state: AppState) -> Router {
     let read_routes = Router::new()
         .route("/health", get(health_handler))
         .route("/sessions", get(list_sessions_handler))
+        .route("/sessions/orphaned", get(list_orphaned_handler))
         .route("/sessions/:id", get(get_session_handler))
         .route("/sessions/:id/poll", get(poll_handler))
         .route("/sessions/:id/files", get(session_files_handler))
@@ -69,6 +70,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/:id/input", post(send_input_handler))
         .route("/sessions/:id/resize", post(resize_handler))
         .route("/sessions/:id/hook", post(hook_handler))
+        .route("/sessions/:id/recover", post(recover_session_handler))
+        .route("/sessions/:id/orphaned", delete(discard_orphaned_handler))
         .route("/folders", post(create_folder_handler))
         .route("/projects", post(create_project_handler))
         .route("/projects/:id", patch(rename_project_handler))

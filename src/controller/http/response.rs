@@ -383,6 +383,41 @@ pub struct FileContentData {
 }
 
 // =============================================================================
+// Orphaned Session Response Data Types
+// =============================================================================
+
+/// Orphaned session info (for recovery UI)
+#[derive(Debug, Serialize)]
+pub struct OrphanedSessionData {
+    pub id: String,
+    pub name: String,
+    pub folder: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_input: Option<String>,
+}
+
+/// Orphaned sessions list response
+#[derive(Debug, Serialize)]
+pub struct OrphanedSessionsData {
+    pub sessions: Vec<OrphanedSessionData>,
+}
+
+/// Orphaned session recovered response
+#[derive(Debug, Serialize)]
+pub struct RecoveredSessionData {
+    pub session: crate::model::Session,
+}
+
+/// Orphaned session discarded response
+#[derive(Debug, Serialize)]
+pub struct DiscardedSessionData {
+    pub discarded: bool,
+}
+
+// =============================================================================
 // IntoResponse Implementation
 // =============================================================================
 
