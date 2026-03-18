@@ -151,7 +151,16 @@ export function useXterm({
     });
 
     // Handle keyboard input (desktop only — mobile uses a separate input bar)
+    // Filter out mouse event sequences — xterm.js sends these when the user
+    // clicks the terminal, and tmux/Claude interprets the encoded coordinates
+    // as literal text (e.g. "8" from coordinate bytes).
     const inputDisposable = terminal.onData((data) => {
+      // X10/Normal mouse: \x1b[M followed by 3 bytes (button, x, y)
+      if (data.length >= 3 && data.startsWith('\x1b[M')) return;
+      // SGR mouse: \x1b[< ... M or \x1b[< ... m (press/release)
+      if (/^\x1b\[<[\d;]*[Mm]$/.test(data)) return;
+      // urxvt mouse: \x1b[ digits ; digits ; digits M
+      if (/^\x1b\[\d+;\d+;\d+M$/.test(data)) return;
       onInputRef.current(data);
     });
 
