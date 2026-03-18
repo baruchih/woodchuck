@@ -442,7 +442,7 @@ export function SessionPage() {
             onResize={handleTerminalResize}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
-            disableKeyboard
+            disableKeyboard={isMobile}
             refreshKey={refreshKey}
           />
         </div>

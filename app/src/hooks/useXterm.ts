@@ -155,6 +155,10 @@ export function useXterm({
     // clicks the terminal, and tmux/Claude interprets the encoded coordinates
     // as literal text (e.g. "8" from coordinate bytes).
     const inputDisposable = terminal.onData((data) => {
+      // DEBUG: log raw data as hex to diagnose ghost "8" input
+      const hex = Array.from(data).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
+      console.log(`[xterm onData] len=${data.length} hex=[${hex}] repr=${JSON.stringify(data)}`);
+
       // X10/Normal mouse: \x1b[M followed by 3 bytes (button, x, y)
       if (data.length >= 3 && data.startsWith('\x1b[M')) return;
       // SGR mouse: \x1b[< ... M or \x1b[< ... m (press/release)
