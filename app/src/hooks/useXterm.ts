@@ -151,33 +151,7 @@ export function useXterm({
     });
 
     // Handle keyboard input (desktop only — mobile uses a separate input bar)
-    // Filter out mouse event sequences and ghost key repeats.
-    let lastChar = '';
-    let repeatCount = 0;
-    let repeatResetTimer = 0;
-
     const inputDisposable = terminal.onData((data) => {
-      // X10/Normal mouse: \x1b[M followed by 3 bytes (button, x, y)
-      if (data.length >= 3 && data.startsWith('\x1b[M')) return;
-      // SGR mouse: \x1b[< ... M or \x1b[< ... m (press/release)
-      if (/^\x1b\[<[\d;]*[Mm]$/.test(data)) return;
-
-      // Ghost key repeat protection: if the same single printable character
-      // arrives 6+ times in rapid succession (within the 300ms reset window),
-      // suppress it. Legitimate typing rarely sends the same character that
-      // fast. Arrow keys, Enter, Escape etc. are multi-byte so they pass through.
-      if (data.length === 1 && data >= ' ' && data <= '~') {
-        if (data === lastChar) {
-          repeatCount++;
-          if (repeatCount >= 6) return; // suppress ghost repeats
-        } else {
-          lastChar = data;
-          repeatCount = 1;
-        }
-        clearTimeout(repeatResetTimer);
-        repeatResetTimer = window.setTimeout(() => { repeatCount = 0; lastChar = ''; }, 300);
-      }
-
       onInputRef.current(data);
     });
 
