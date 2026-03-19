@@ -224,9 +224,7 @@ export function SessionInfoSheet({
             <div className="bg-primary/10 border border-primary/20 rounded-sm p-3">
               <div className="flex items-center justify-between">
                 <label className="text-xs text-primary uppercase tracking-wider font-medium">Current Request</label>
-                {session.last_input_at && (
-                  <span className="text-xs text-text-muted">{formatDateTime(session.last_input_at)}</span>
-                )}
+                <span className="text-xs text-text-muted">{formatDateTime(session.last_input_at || session.updated_at)}</span>
               </div>
               <p className="mt-1 text-text text-sm line-clamp-3">{session.last_input}</p>
             </div>
