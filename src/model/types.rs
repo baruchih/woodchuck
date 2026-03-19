@@ -47,6 +47,10 @@ pub struct Session {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_input: Option<String>,
 
+    /// When the last input was sent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_input_at: Option<DateTime<Utc>>,
+
     /// User-assigned tags for filtering/grouping
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,

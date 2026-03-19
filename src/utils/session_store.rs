@@ -59,6 +59,10 @@ pub struct PersistedSessionState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_input: Option<String>,
 
+    /// When the last input was sent
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_input_at: Option<DateTime<Utc>>,
+
     /// User-assigned tags for filtering/grouping
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
@@ -622,6 +626,7 @@ mod tests {
             last_working_at: Some(Utc::now()),
             project_id: None,
             last_input: None,
+            last_input_at: None,
             tags: Vec::new(),
             last_notified_status: None,
             folder: None,
@@ -713,6 +718,7 @@ mod tests {
                 last_working_at: Some(working_since),
                 project_id: None,
                 last_input: None,
+                last_input_at: None,
                 tags: Vec::new(),
                 last_notified_status: None,
                 folder: None,

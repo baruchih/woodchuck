@@ -134,6 +134,7 @@ pub async fn list_sessions(tmux: &(impl TmuxClient + ?Sized)) -> Result<Vec<Sess
             working_since: None, // Will be overlaid from shared state in handler
             project_id: None,    // Will be overlaid from shared state in handler
             last_input: None,    // Will be overlaid from shared state in handler
+            last_input_at: None, // Will be overlaid from shared state in handler
             tags: Vec::new(),    // Will be overlaid from shared state in handler
         }
     }).collect();
@@ -178,8 +179,9 @@ pub async fn get_session(tmux: &(impl TmuxClient + ?Sized), session_id: &str) ->
         updated_at,
         working_since: None, // Will be overlaid from shared state in handler
         project_id: None,    // Will be overlaid from shared state in handler
-        last_input: None,    // Will be overlaid from shared state in handler
-        tags: Vec::new(),    // Will be overlaid from shared state in handler
+        last_input: None,     // Will be overlaid from shared state in handler
+        last_input_at: None,  // Will be overlaid from shared state in handler
+        tags: Vec::new(),     // Will be overlaid from shared state in handler
     })
 }
 
@@ -260,6 +262,7 @@ pub async fn create_session(
         working_since: Some(now), // New sessions start as Working
         project_id: None,         // New sessions are ungrouped by default
         last_input: None,         // No input sent yet
+        last_input_at: None,      // No input sent yet
         tags: Vec::new(),         // No tags by default
     })
 }

@@ -11,6 +11,7 @@ export interface Session {
   working_since?: string;
   project_id?: string;
   last_input?: string;
+  last_input_at?: string;
   tags?: string[];
 }
 

@@ -85,6 +85,7 @@ pub async fn list_sessions_handler(
             session.working_since = ss.working_since;
             session.project_id = ss.project_id.clone();
             session.last_input = ss.last_input.clone();
+            session.last_input_at = ss.last_input_at;
             session.tags = ss.tags.clone();
             // Only overlay name if we have a user-provided name stored
             if !ss.name.is_empty() {
@@ -220,6 +221,7 @@ pub async fn send_input_handler(
         let mut states = state.session_states.write().await;
         if let Some(ss) = states.get_mut(&session_id) {
             ss.last_input = Some(last_input);
+            ss.last_input_at = Some(chrono::Utc::now());
 
             // Persist updated state (non-fatal if fails)
             let persisted = ss.to_persisted();
@@ -1561,6 +1563,7 @@ pub async fn recover_session_handler(
         working_since: Some(now),
         project_id: persisted.project_id.clone(),
         last_input: persisted.last_input.clone(),
+        last_input_at: persisted.last_input_at,
         tags: persisted.tags.clone(),
     };
 

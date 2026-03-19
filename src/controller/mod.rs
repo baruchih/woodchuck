@@ -213,6 +213,7 @@ async fn start_maintainer(
                     last_working_at: Some(chrono::Utc::now()),
                     project_id: None,
                     last_input: None,
+                    last_input_at: None,
                     tags: Vec::new(),
                     last_notified_status: None,
                     folder: Some(repo_dir),

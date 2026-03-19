@@ -45,6 +45,9 @@ pub struct SessionState {
     /// Last input sent to the session (for historical context)
     pub last_input: Option<String>,
 
+    /// When the last input was sent
+    pub last_input_at: Option<DateTime<Utc>>,
+
     /// User-assigned tags for filtering/grouping
     pub tags: Vec<String>,
 
@@ -73,6 +76,7 @@ impl Default for SessionState {
             last_working_at: None,
             project_id: None,
             last_input: None,
+            last_input_at: None,
             tags: Vec::new(),
             folder: None,
             is_maintainer: false,
@@ -109,6 +113,7 @@ impl SessionState {
             last_working_at: persisted.last_working_at,
             project_id: persisted.project_id,
             last_input: persisted.last_input,
+            last_input_at: persisted.last_input_at,
             tags: persisted.tags,
             folder: persisted.folder,
             last_notified_status,
@@ -125,6 +130,7 @@ impl SessionState {
             last_working_at: self.last_working_at,
             project_id: self.project_id.clone(),
             last_input: self.last_input.clone(),
+            last_input_at: self.last_input_at,
             tags: self.tags.clone(),
             last_notified_status: self.last_notified_status,
             folder: self.folder.clone(),
