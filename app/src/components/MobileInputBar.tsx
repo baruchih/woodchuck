@@ -88,7 +88,10 @@ export function MobileInputBar({
         return;
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // On mobile: Enter inserts newline, user taps Send button.
+    // On desktop: Enter sends, Shift+Enter inserts newline.
+    const isMobile = 'ontouchstart' in window && window.innerWidth < 768;
+    if (e.key === 'Enter' && !isMobile && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
