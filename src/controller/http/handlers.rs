@@ -124,6 +124,7 @@ pub async fn get_session_handler(
         session.working_since = ss.working_since;
         session.project_id = ss.project_id.clone();
         session.last_input = ss.last_input.clone();
+        session.last_input_at = ss.last_input_at;
         session.tags = ss.tags.clone();
         if !ss.name.is_empty() {
             session.name = ss.name.clone();
