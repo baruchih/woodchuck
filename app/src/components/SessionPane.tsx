@@ -1,11 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { XtermTerminal } from './XtermTerminal';
+import { SessionInfoSheet } from './SessionInfoSheet';
 import { UploadStatus, useUploadStatus } from './UploadStatus';
 import { FileBrowser } from './FileBrowser';
 import { useTerminal } from '../hooks/useTerminal';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
 import { useSessions } from '../hooks/useSessions';
 import { useWS } from '../context/WebSocketContext';
+import type { Session } from '../types';
 
 interface SessionPaneProps {
   sessionId: string;
@@ -16,7 +18,7 @@ interface SessionPaneProps {
 }
 
 export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove }: SessionPaneProps) {
-  const { sendInput, uploadFiles } = useSessions();
+  const { sendInput, uploadFiles, getSession, deleteSession, renameSession, moveToProject } = useSessions();
   const { resize, sendRawInput } = useWS();
   const { content, needsAttention, triggerFastPoll, notifySentText, forceRefresh } = useTerminal({ sessionId });
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
@@ -24,9 +26,21 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const [sending, setSending] = useState(false);
   const { uploadStatus, setUploading, setUploadProgress, setUploadResult } = useUploadStatus();
   const [showFileBrowser, setShowFileBrowser] = useState(false);
+  const [showInfoSheet, setShowInfoSheet] = useState(false);
+  const [infoSession, setInfoSession] = useState<Session | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
+
+  const handleShowInfo = useCallback(async () => {
+    try {
+      const data = await getSession(sessionId);
+      setInfoSession(data.session);
+      setShowInfoSheet(true);
+    } catch (err) {
+      console.error('Failed to load session info:', err);
+    }
+  }, [sessionId, getSession]);
 
   const handleTerminalInput = useCallback((data: string) => {
     if (!focused) return;
@@ -124,6 +138,13 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
           <span className="text-xs font-medium text-text truncate">{sessionName}</span>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          <button onClick={(e) => { e.stopPropagation(); handleShowInfo(); }} className="text-[10px] text-text-muted px-1 hover:text-primary" title="Session info" aria-label="Session info">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
+            </svg>
+          </button>
           <button onClick={(e) => { e.stopPropagation(); setShowFileBrowser(true); }} className="text-[10px] text-text-muted px-1 hover:text-primary" title="Browse files" aria-label="Browse files">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
@@ -212,6 +233,17 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         <FileBrowser
           sessionId={sessionId}
           onClose={() => setShowFileBrowser(false)}
+        />
+      )}
+      {/* Session Info Sheet */}
+      {showInfoSheet && (
+        <SessionInfoSheet
+          session={infoSession}
+          content={content}
+          onClose={() => setShowInfoSheet(false)}
+          onDelete={(id) => { deleteSession(id); onRemove(); }}
+          onRename={renameSession}
+          onMoveToProject={moveToProject}
         />
       )}
     </div>
