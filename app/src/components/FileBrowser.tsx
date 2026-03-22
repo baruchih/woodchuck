@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { marked } from 'marked';
 import { api } from '../api/client';
 import type { FileEntry } from '../types';
 
@@ -304,6 +305,13 @@ function FileNode({
   );
 }
 
+const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx']);
+
+function isMarkdownFile(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return MARKDOWN_EXTENSIONS.has(ext);
+}
+
 function FileViewer({
   sessionId,
   path,
@@ -319,6 +327,9 @@ function FileViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showPreview, setShowPreview] = useState(() => isMarkdownFile(name));
+  const [fontSize, setFontSize] = useState(12);
+  const isMd = isMarkdownFile(name);
 
   useEffect(() => {
     let cancelled = false;
@@ -379,6 +390,30 @@ function FileViewer({
         <div className="flex items-center justify-between gap-2 px-3 pb-2">
           <span className="text-[10px] text-text-muted truncate">{path}</span>
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Font size controls */}
+            <button
+              onClick={() => setFontSize(s => Math.max(8, s - 2))}
+              className="px-1.5 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
+              title="Decrease font size"
+            >A-</button>
+            <button
+              onClick={() => setFontSize(s => Math.min(24, s + 2))}
+              className="px-1.5 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
+              title="Increase font size"
+            >A+</button>
+            {/* Markdown preview toggle */}
+            {isMd && (
+              <button
+                onClick={() => setShowPreview(p => !p)}
+                className={`flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-medium transition-colors ${
+                  showPreview
+                    ? 'border-primary text-primary'
+                    : 'border-border text-text-muted hover:text-primary hover:border-primary'
+                }`}
+              >
+                {showPreview ? 'Raw' : 'Preview'}
+              </button>
+            )}
             {/* Copy all button */}
             <button
               onClick={handleCopyAll}
@@ -437,10 +472,27 @@ function FileViewer({
         )}
 
         {!loading && !error && content != null && (
-          <pre
-            id="file-viewer-content"
-            className="p-4 text-xs leading-relaxed text-text font-mono whitespace-pre-wrap break-words select-text"
-          >{content}</pre>
+          isMd && showPreview ? (
+            <div
+              id="file-viewer-content"
+              className="p-4 text-text select-text prose prose-invert prose-sm max-w-none
+                prose-headings:text-text prose-p:text-text prose-a:text-primary
+                prose-strong:text-text prose-code:text-primary/80 prose-code:bg-surface
+                prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                prose-pre:bg-surface prose-pre:border prose-pre:border-border
+                prose-blockquote:border-primary/40 prose-blockquote:text-text-muted
+                prose-li:text-text prose-th:text-text prose-td:text-text
+                prose-hr:border-border"
+              style={{ fontSize: `${fontSize}px` }}
+              dangerouslySetInnerHTML={{ __html: marked.parse(content) as string }}
+            />
+          ) : (
+            <pre
+              id="file-viewer-content"
+              className="p-4 leading-relaxed text-text font-mono whitespace-pre-wrap break-words select-text"
+              style={{ fontSize: `${fontSize}px` }}
+            >{content}</pre>
+          )
         )}
       </div>
     </div>
