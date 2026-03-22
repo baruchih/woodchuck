@@ -43,6 +43,9 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewingFile, setViewingFile] = useState<{ path: string; name: string } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const loadFiles = useCallback(async () => {
     setLoading(true);
@@ -61,6 +64,26 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
   useEffect(() => {
     loadFiles();
   }, [loadFiles]);
+
+  // Debounced search
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const data = await api.searchSessionFiles(sessionId, searchQuery.trim());
+        setSearchResults(data.files);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, sessionId]);
 
   // Close on Escape (only when not viewing a file)
   useEffect(() => {
@@ -118,9 +141,21 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
           </div>
         </div>
 
+        {/* Search input */}
+        <div className="px-3 py-2 border-b border-border/50 shrink-0">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search files..."
+            className="w-full bg-background border border-border rounded-sm px-3 py-1.5 text-xs text-text placeholder:text-text-muted focus:outline-none focus:border-primary"
+            autoComplete="off"
+          />
+        </div>
+
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-2 py-2">
-          {loading && (
+          {!searchQuery.trim() && loading && (
             <div className="flex items-center justify-center py-8">
               <svg className="w-5 h-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -129,19 +164,66 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
             </div>
           )}
 
-          {error && (
+          {!searchQuery.trim() && error && (
             <div className="text-center py-8">
               <p className="text-status-error text-sm">{error}</p>
             </div>
           )}
 
-          {!loading && !error && files.length === 0 && (
+          {!searchQuery.trim() && !loading && !error && files.length === 0 && (
             <div className="text-center py-8">
               <p className="text-text-muted text-sm">Empty folder</p>
             </div>
           )}
 
-          {!loading && !error && files.length > 0 && (
+          {/* Search results */}
+          {searchQuery.trim() && (
+            <>
+              {searching && (
+                <div className="flex items-center justify-center py-8">
+                  <svg className="w-5 h-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+              )}
+              {!searching && searchResults && searchResults.length === 0 && (
+                <div className="text-center py-8">
+                  <p className="text-text-muted text-sm">No files found</p>
+                </div>
+              )}
+              {!searching && searchResults && searchResults.length > 0 && (
+                <div className="space-y-px">
+                  {searchResults.map((entry) => (
+                    <div
+                      key={entry.path}
+                      className="flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-surface cursor-pointer group"
+                      onClick={() => {
+                        if (isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024)) {
+                          setViewingFile({ path: entry.path, name: entry.name });
+                        }
+                      }}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-text-muted shrink-0">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs text-text truncate block">{entry.name}</span>
+                        <span className="text-[10px] text-text-muted truncate block">{entry.path}</span>
+                      </div>
+                      {entry.size != null && (
+                        <span className="text-[10px] text-text-muted shrink-0">{formatSize(entry.size)}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Normal tree view (hidden when searching) */}
+          {!searchQuery.trim() && !loading && !error && files.length > 0 && (
             <div className="space-y-px">
               {files.map((entry) => (
                 <FileNode

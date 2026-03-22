@@ -1173,6 +1173,9 @@ pub struct FilesQuery {
     /// Optional subdirectory path (relative to session root) to list.
     /// When omitted, lists the root directory.
     pub path: Option<String>,
+    /// Optional search query — returns a flat list of files whose name
+    /// contains the query (case-insensitive recursive search).
+    pub search: Option<String>,
 }
 
 /// GET /sessions/:id/files?path= — list a single directory level (lazy loading)
@@ -1220,6 +1223,17 @@ pub async fn session_files_handler(
     let canonical_root = root.canonicalize().map_err(|_| {
         err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Could not resolve folder", "IO_ERROR")
     })?;
+
+    // If search query provided, do recursive name search instead of listing
+    if let Some(ref search_query) = query.search {
+        let query_lower = search_query.to_lowercase();
+        if query_lower.is_empty() {
+            return Ok(ApiResponse::ok(SessionFilesData { root: session.folder, files: vec![] }));
+        }
+        let files = search_files_recursive(&canonical_root, &canonical_root, &query_lower, 0).await;
+        debug!(session = %session_id, query = %search_query, count = files.len(), "Searched session files");
+        return Ok(ApiResponse::ok(SessionFilesData { root: session.folder, files }));
+    }
 
     let files = list_dir_single_level(&canonical_root, &target).await;
 
@@ -1290,6 +1304,75 @@ async fn list_dir_single_level(
     }
 
     entries
+}
+
+/// Recursively search for files whose name contains the query (case-insensitive).
+/// Returns a flat list of matching files. Skips hidden directories and caps at 100 results.
+const MAX_SEARCH_RESULTS: usize = 100;
+const MAX_SEARCH_DEPTH: usize = 10;
+
+fn search_files_recursive<'a>(
+    base: &'a std::path::Path,
+    dir: &'a std::path::Path,
+    query: &'a str,
+    depth: usize,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<FileEntry>> + Send + 'a>> {
+  Box::pin(async move {
+    if depth > MAX_SEARCH_DEPTH {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+    let mut read_dir = match tokio::fs::read_dir(dir).await {
+        Ok(rd) => rd,
+        Err(_) => return results,
+    };
+
+    let mut sub_entries = Vec::new();
+    while let Ok(Some(entry)) = read_dir.next_entry().await {
+        sub_entries.push(entry);
+    }
+
+    for entry in sub_entries {
+        if results.len() >= MAX_SEARCH_RESULTS {
+            break;
+        }
+
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let path = entry.path();
+        let metadata = match entry.metadata().await {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        if metadata.is_dir() {
+            // Recurse into subdirectories
+            let mut sub_results = search_files_recursive(base, &path, query, depth + 1).await;
+            let remaining = MAX_SEARCH_RESULTS - results.len();
+            sub_results.truncate(remaining);
+            results.extend(sub_results);
+        } else if name.to_lowercase().contains(query) {
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .to_string();
+            results.push(FileEntry {
+                name,
+                path: relative,
+                is_dir: false,
+                size: Some(metadata.len()),
+                children: None,
+            });
+        }
+    }
+
+    results
+  })
 }
 
 /// Query params for file download

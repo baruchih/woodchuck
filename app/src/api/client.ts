@@ -122,6 +122,9 @@ export const api = {
     return request(`/sessions/${encodeURIComponent(id)}/files${query}`);
   },
 
+  searchSessionFiles: (id: string, query: string): Promise<SessionFilesData> =>
+    request(`/sessions/${encodeURIComponent(id)}/files?search=${encodeURIComponent(query)}`),
+
   getFileContent: (id: string, path: string): Promise<FileContentData> =>
     request(`/sessions/${encodeURIComponent(id)}/file-content?path=${encodeURIComponent(path)}`),
 
