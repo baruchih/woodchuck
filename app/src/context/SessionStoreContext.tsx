@@ -53,9 +53,12 @@ export function SessionStoreProvider({ children }: SessionStoreProviderProps) {
     setSessions(sortSessions(filtered));
   }, []);
 
+  const wsRequestRef = useRef(ws.wsRequest);
+  wsRequestRef.current = ws.wsRequest;
+
   const fetchSessions = useCallback(() => {
     setLoading(true);
-    ws.wsRequest<SessionsMessage>({ type: 'get_sessions' })
+    wsRequestRef.current<SessionsMessage>({ type: 'get_sessions' })
       .then((msg) => {
         sessionMapRef.current.clear();
         for (const s of msg.sessions) {
@@ -65,7 +68,6 @@ export function SessionStoreProvider({ children }: SessionStoreProviderProps) {
       })
       .catch((err) => {
         console.error('Failed to fetch sessions via WS, falling back to HTTP:', err);
-        // Fallback to HTTP API
         api.getSessions()
           .then((data) => {
             sessionMapRef.current.clear();
@@ -81,19 +83,17 @@ export function SessionStoreProvider({ children }: SessionStoreProviderProps) {
       .finally(() => {
         setLoading(false);
       });
-  }, [ws, buildSortedList]);
+  }, [buildSortedList]);
 
   // Fetch on mount and on reconnect
   const prevConnectedRef = useRef(false);
+  const connectedNow = ws.connected;
   useEffect(() => {
-    if (ws.connected) {
-      // Fetch on initial connect or reconnect
-      if (!prevConnectedRef.current) {
-        fetchSessions();
-      }
+    if (connectedNow && !prevConnectedRef.current) {
+      fetchSessions();
     }
-    prevConnectedRef.current = ws.connected;
-  }, [ws.connected, fetchSessions]);
+    prevConnectedRef.current = connectedNow;
+  }, [connectedNow, fetchSessions]);
 
   // Listen for broadcast events
   useEffect(() => {
@@ -133,7 +133,8 @@ export function SessionStoreProvider({ children }: SessionStoreProviderProps) {
       unsubUpdated();
       unsubStatus();
     };
-  }, [ws, buildSortedList]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getSessionById = useCallback((id: string): Session | undefined => {
     return sessionMapRef.current.get(id);
