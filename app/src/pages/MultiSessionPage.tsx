@@ -3,12 +3,30 @@ import { useNavigate } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { SessionPane } from '../components/SessionPane';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import { useSessions } from '../hooks/useSessions';
+import { useSessionStore } from '../context/SessionStoreContext';
+import { api } from '../api/client';
 import type { Session } from '../types';
+
+const MAINTAINER_ID = 'woodchuck-maintainer';
 
 export function MultiSessionPage() {
   const navigate = useNavigate();
-  const { sessions, refresh } = useSessions();
+  const { sessions: storeSessions } = useSessionStore();
+  const [maintainer, setMaintainer] = useState<Session | null>(null);
+
+  // Fetch maintainer session (filtered out of the store)
+  useEffect(() => {
+    api.getSession(MAINTAINER_ID)
+      .then(data => setMaintainer(data.session))
+      .catch(() => {});
+  }, []);
+
+  // Combine regular sessions + maintainer
+  const sessions = useMemo(() => {
+    const all = [...storeSessions];
+    if (maintainer) all.push(maintainer);
+    return all;
+  }, [storeSessions, maintainer]);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('woodchuck-multi-sessions');
@@ -18,8 +36,7 @@ export function MultiSessionPage() {
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
 
-  // Load sessions on mount
-  useEffect(() => { refresh(); }, [refresh]);
+  // Sessions come from the store (WS-based, no HTTP fetch needed)
 
   // Persist selection
   useEffect(() => {
