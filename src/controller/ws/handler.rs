@@ -108,7 +108,7 @@ pub async fn handle_connection(
             Ok(m) => m,
             Err(e) => {
                 warn!("Invalid message: {}", e);
-                let _ = tx.send(ServerMessage::Error {
+                let _ = tx.try_send(ServerMessage::Error {
                     session_id: String::new(),
                     message: "Invalid message format".to_string(),
                     request_id: None,
@@ -132,7 +132,7 @@ pub async fn handle_connection(
         // Validate session_id format when present
         if let Some(session_id_ref) = session_id_opt {
             if !validate_ws_session_id(session_id_ref) {
-                let _ = tx.send(ServerMessage::Error {
+                let _ = tx.try_send(ServerMessage::Error {
                     session_id: String::new(),
                     message: "Invalid session ID format".to_string(),
                     request_id: None,
@@ -156,12 +156,12 @@ pub async fn handle_connection(
             }
             ClientMessage::Unsubscribe { session_id } => {
                 handle_unsubscribe(&session_id, &subscriptions, &session_states, &subscribers).await;
-                let _ = tx.send(ServerMessage::Unsubscribed { session_id });
+                let _ = tx.try_send(ServerMessage::Unsubscribed { session_id });
             }
             ClientMessage::Input { session_id, text, raw } => {
                 // Validate input length
                 if text.len() > MAX_WS_INPUT_LEN {
-                    let _ = tx.send(ServerMessage::Error {
+                    let _ = tx.try_send(ServerMessage::Error {
                         session_id: session_id.clone(),
                         message: "Input too long".to_string(),
                         request_id: None,
@@ -232,7 +232,7 @@ async fn handle_subscribe(
     match tmux.has_session(session_id).await {
         Ok(true) => {}
         Ok(false) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: "Session not found".to_string(),
                 request_id: None,
@@ -241,7 +241,7 @@ async fn handle_subscribe(
         }
         Err(e) => {
             warn!(session = %session_id, error = %e, "tmux error during subscribe");
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: "Internal error checking session".to_string(),
                 request_id: None,
@@ -257,7 +257,7 @@ async fn handle_subscribe(
             (output, status)
         }
         Err(e) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: format!("Failed to get output: {}", e),
                 request_id: None,
@@ -276,7 +276,7 @@ async fn handle_subscribe(
     add_subscriber(subscribers, session_states, session_id, tx.clone()).await;
 
     // Send subscription confirmation with current state
-    let _ = tx.send(ServerMessage::Subscribed {
+    let _ = tx.try_send(ServerMessage::Subscribed {
         session_id: session_id.to_string(),
         current_output,
         status: status.to_string(),
@@ -321,7 +321,7 @@ async fn handle_input(
                 debug!(session = %session_id, "Raw input sent via WebSocket");
             }
             Err(e) => {
-                let _ = tx.send(ServerMessage::Error {
+                let _ = tx.try_send(ServerMessage::Error {
                     session_id: session_id.to_string(),
                     message: format!("Failed to send raw input: {}", e),
                     request_id: None,
@@ -358,7 +358,7 @@ async fn handle_input(
                 }
             }
             Err(e) => {
-                let _ = tx.send(ServerMessage::Error {
+                let _ = tx.try_send(ServerMessage::Error {
                     session_id: session_id.to_string(),
                     message: format!("Failed to send input: {}", e),
                     request_id: None,
@@ -378,7 +378,7 @@ async fn handle_resize(
 ) {
     // Validate dimensions
     if cols == 0 || cols > 500 || rows == 0 || rows > 200 {
-        let _ = tx.send(ServerMessage::Error {
+        let _ = tx.try_send(ServerMessage::Error {
             session_id: session_id.to_string(),
             message: format!(
                 "Invalid dimensions: cols={} rows={} (must be 1-500 x 1-200)",
@@ -394,7 +394,7 @@ async fn handle_resize(
             debug!(session = %session_id, cols = %cols, rows = %rows, "Resized via WebSocket");
         }
         Err(e) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: format!("Failed to resize: {}", e),
                 request_id: None,
@@ -417,7 +417,7 @@ async fn handle_get_sessions(
     let sessions = match list_sessions(tmux.as_ref()).await {
         Ok(s) => s,
         Err(e) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: String::new(),
                 message: format!("Failed to list sessions: {}", e),
                 request_id,
@@ -452,7 +452,7 @@ async fn handle_get_sessions(
     // Filter out maintainer session
     sessions.retain(|s| s.id != crate::controller::maintainer::MAINTAINER_SESSION_ID);
 
-    let _ = tx.send(ServerMessage::Sessions { sessions, request_id });
+    let _ = tx.try_send(ServerMessage::Sessions { sessions, request_id });
 }
 
 /// Handle get_session: return single session detail with recent output
@@ -466,7 +466,7 @@ async fn handle_get_session(
     let mut session = match get_session(tmux.as_ref(), session_id).await {
         Ok(s) => s,
         Err(e) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: format!("Failed to get session: {}", e),
                 request_id,
@@ -496,7 +496,7 @@ async fn handle_get_session(
     // Get recent output
     let recent_output = get_session_output(tmux.as_ref(), session_id, 200).await.ok();
 
-    let _ = tx.send(ServerMessage::SessionDetail {
+    let _ = tx.try_send(ServerMessage::SessionDetail {
         session,
         recent_output,
         request_id,
@@ -522,7 +522,7 @@ async fn handle_create_session(
     let session = match create_session(tmux.as_ref(), config, params).await {
         Ok(s) => s,
         Err(e) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: String::new(),
                 message: format!("Failed to create session: {}", e),
                 request_id,
@@ -553,7 +553,7 @@ async fn handle_create_session(
 
     // Send ack to requesting client
     if let Some(ref rid) = request_id {
-        let _ = tx.send(ServerMessage::Ack {
+        let _ = tx.try_send(ServerMessage::Ack {
             request_id: rid.clone(),
             success: true,
         });
@@ -574,7 +574,7 @@ async fn handle_delete_session(
     global_broadcast: &tokio::sync::broadcast::Sender<ServerMessage>,
 ) {
     if let Err(e) = delete_session(tmux.as_ref(), session_id).await {
-        let _ = tx.send(ServerMessage::Error {
+        let _ = tx.try_send(ServerMessage::Error {
             session_id: session_id.to_string(),
             message: format!("Failed to delete session: {}", e),
             request_id,
@@ -595,7 +595,7 @@ async fn handle_delete_session(
 
     // Send ack to requesting client
     if let Some(ref rid) = request_id {
-        let _ = tx.send(ServerMessage::Ack {
+        let _ = tx.try_send(ServerMessage::Ack {
             request_id: rid.clone(),
             success: true,
         });
@@ -625,7 +625,7 @@ async fn handle_update_session(
     match tmux.has_session(session_id).await {
         Ok(true) => {}
         Ok(false) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: "Session not found".to_string(),
                 request_id,
@@ -633,7 +633,7 @@ async fn handle_update_session(
             return;
         }
         Err(e) => {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: format!("Failed to check session: {}", e),
                 request_id,
@@ -645,7 +645,7 @@ async fn handle_update_session(
     // Validate name if provided
     if let Some(ref new_name) = name {
         if let Err(e) = validate_rename(session_id, new_name) {
-            let _ = tx.send(ServerMessage::Error {
+            let _ = tx.try_send(ServerMessage::Error {
                 session_id: session_id.to_string(),
                 message: format!("Invalid name: {}", e),
                 request_id,
@@ -688,7 +688,7 @@ async fn handle_update_session(
 
     // Send ack to requesting client
     if let Some(ref rid) = request_id {
-        let _ = tx.send(ServerMessage::Ack {
+        let _ = tx.try_send(ServerMessage::Ack {
             request_id: rid.clone(),
             success: true,
         });
