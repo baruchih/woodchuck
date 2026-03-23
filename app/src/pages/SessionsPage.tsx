@@ -17,6 +17,7 @@ import { useProjects } from '../hooks/useProjects';
 import { useNotifications } from '../hooks/useNotifications';
 import { usePushSubscription } from '../hooks/usePushSubscription';
 import { useWS } from '../context/WebSocketContext';
+import { useSessionStore } from '../context/SessionStoreContext';
 import type { Session, SessionStatus } from '../types';
 
 type ViewMode = 'list' | 'grid';
@@ -119,7 +120,8 @@ function loadHiddenProjects(): Set<string> {
 
 export function SessionsPage() {
   const navigate = useNavigate();
-  const { sessions, loading, error, refresh, deleteSession, renameSession, moveToProject, updateTags } = useSessions();
+  const { sessions, loading, refreshSessions } = useSessionStore();
+  const { deleteSession, renameSession, moveToProject, updateTags } = useSessions();
   const {
     projects,
     loading: projectsLoading,
@@ -187,11 +189,10 @@ export function SessionsPage() {
     });
   }, [sessions, searchQuery, activeTagFilters]);
 
-  // Initial load
+  // Initial load (sessions come from the WebSocket session store, only projects need HTTP)
   useEffect(() => {
-    refresh();
     refreshProjects();
-  }, [refresh, refreshProjects]);
+  }, [refreshProjects]);
 
   // Derive a stable string of session IDs to avoid re-running on status-only changes
   const sessionIds = sessions.map((s) => s.id).join(',');
@@ -254,11 +255,11 @@ export function SessionsPage() {
         });
       }
 
-      refresh();
+      // Session store handles status updates via WebSocket — no HTTP refresh needed
     });
 
     return unsub;
-  }, [onStatus, refresh, notifySession]);
+  }, [onStatus, notifySession]);
 
   // Sync prevStatusRef with sessions on load
   useEffect(() => {
@@ -494,14 +495,14 @@ export function SessionsPage() {
     if (pendingDeleteProjectId) {
       try {
         await deleteProject(pendingDeleteProjectId);
-        await refresh(); // Refresh sessions to update project_id = null
+        refreshSessions(); // Refresh sessions to update project_id = null
       } catch {
         // Error handling
       } finally {
         setPendingDeleteProjectId(null);
       }
     }
-  }, [pendingDeleteProjectId, deleteProject, refresh]);
+  }, [pendingDeleteProjectId, deleteProject, refreshSessions]);
 
   const handleDeleteProjectCancel = useCallback(() => {
     setPendingDeleteProjectId(null);
@@ -704,7 +705,7 @@ export function SessionsPage() {
   return (
     <Layout title="Woodchuck" rightAction={rightAction}>
       <LogoWatermark />
-      <PullToRefresh onRefresh={refresh}>
+      <PullToRefresh onRefresh={async () => refreshSessions()}>
         <div className="pb-safe relative min-h-full">
           {/* Notification banners */}
           <NotificationBanner
@@ -791,18 +792,7 @@ export function SessionsPage() {
               </div>
             )}
 
-            {/* Error state */}
-            {error && (
-              <div className="bg-status-error/10 border border-status-error rounded-sm p-4 mb-4">
-                <p className="text-status-error text-xs">{error}</p>
-                <button
-                  onClick={() => refresh()}
-                  className="text-primary text-xs mt-2 uppercase tracking-wider hover:underline"
-                >
-                  Try again
-                </button>
-              </div>
-            )}
+            {/* Error state — pull down to refresh if sessions fail to load */}
 
             {/* Loading state (initial load only) */}
             {(loading || projectsLoading) && sessions.length === 0 && (
@@ -815,7 +805,7 @@ export function SessionsPage() {
             )}
 
             {/* Empty state */}
-            {!loading && !projectsLoading && !error && sessions.length === 0 && projects.length === 0 && (
+            {!loading && !projectsLoading && sessions.length === 0 && projects.length === 0 && (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <div className="text-text text-sm italic mb-6">
                   {randomItem(EMPTY_STATE_QUOTES)}
