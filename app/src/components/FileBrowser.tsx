@@ -411,6 +411,7 @@ function FileViewer({
   const [copied, setCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(() => isMarkdownFile(name));
   const [fontSize, setFontSize] = useState(12);
+  const [refreshKey, setRefreshKey] = useState(0);
   const isMd = isMarkdownFile(name);
 
   useEffect(() => {
@@ -428,7 +429,7 @@ function FileViewer({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [sessionId, path]);
+  }, [sessionId, path, refreshKey]);
 
   const handleCopyAll = useCallback(async () => {
     if (!content) return;
@@ -472,6 +473,18 @@ function FileViewer({
         <div className="flex items-center justify-between gap-2 px-3 pb-2">
           <span className="text-[10px] text-text-muted truncate">{path}</span>
           <div className="flex items-center gap-1.5 shrink-0">
+            {/* Refresh */}
+            <button
+              onClick={() => setRefreshKey(k => k + 1)}
+              className="px-1.5 py-1 rounded border border-border text-text-muted hover:text-primary hover:border-primary transition-colors"
+              title="Refresh file"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+            </button>
             {/* Font size controls */}
             <button
               onClick={() => setFontSize(s => Math.max(8, s - 2))}
