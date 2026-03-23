@@ -66,6 +66,9 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
     // Create deploy state (shared between HTTP handlers and ralph auto-deploy)
     let deploy_state = deploy::DeployState::new(&config.data_dir);
 
+    // Create global broadcast channel for session list changes
+    let (global_broadcast, _) = tokio::sync::broadcast::channel::<ws::ServerMessage>(256);
+
     // Start HTTP server (now also serves WebSocket on /ws)
     let (http_stop, app_state) = http::start(
         config.clone(),
@@ -77,6 +80,7 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
         subscribers.clone(),
         session_store.clone(),
         deploy_state.clone(),
+        global_broadcast.clone(),
     )
     .await?;
 
@@ -88,6 +92,7 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
         session_states.clone(),
         subscribers.clone(),
         session_store.clone(),
+        global_broadcast.clone(),
     );
 
     // Start maintainer session and ralph loop

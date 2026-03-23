@@ -38,6 +38,7 @@ pub async fn start(
     subscribers: SubscriberMap,
     session_store: Arc<dyn SessionStore>,
     deploy: DeployState,
+    global_broadcast: tokio::sync::broadcast::Sender<super::super::ws::ServerMessage>,
 ) -> Result<(StopFn, AppState), ModelError> {
     let addr: SocketAddr = format!("{}:{}", config.bind_addr, config.http_port)
         .parse()
@@ -54,6 +55,7 @@ pub async fn start(
         subscribers,
         session_store,
         deploy,
+        global_broadcast,
     );
 
     // Build router

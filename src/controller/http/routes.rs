@@ -135,6 +135,14 @@ async fn ws_upgrade_handler(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| {
-        handle_connection(socket, state.tmux, state.session_states, state.subscribers)
+        handle_connection(
+            socket,
+            state.tmux,
+            state.session_states,
+            state.subscribers,
+            state.config,
+            state.session_store,
+            state.global_broadcast,
+        )
     })
 }

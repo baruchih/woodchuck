@@ -47,6 +47,9 @@ pub struct AppState {
 
     /// Deploy pipeline state
     pub deploy: DeployState,
+
+    /// Global broadcast channel for session list changes (create/delete/update)
+    pub global_broadcast: tokio::sync::broadcast::Sender<ServerMessage>,
 }
 
 impl AppState {
@@ -62,6 +65,7 @@ impl AppState {
         subscribers: SubscriberMap,
         session_store: Arc<dyn SessionStore>,
         deploy: DeployState,
+        global_broadcast: tokio::sync::broadcast::Sender<ServerMessage>,
     ) -> Self {
         Self {
             config,
@@ -74,6 +78,7 @@ impl AppState {
             session_store,
             ralph_handle: Arc::new(tokio::sync::RwLock::new(None)),
             deploy,
+            global_broadcast,
         }
     }
 

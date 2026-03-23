@@ -131,6 +131,7 @@ pub fn start_poller(
     session_states: SharedSessionStates,
     subscribers: SubscriberMap,
     session_store: Arc<dyn SessionStore>,
+    global_broadcast: tokio::sync::broadcast::Sender<ServerMessage>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         tracing::warn!("Output poller: Task spawned");
@@ -174,7 +175,7 @@ pub fn start_poller(
 
             // Check for dead sessions less frequently (~every 5 seconds)
             if tick_count.is_multiple_of(cleanup_every) {
-                cleanup_dead_sessions(&tmux, &session_states, &subscribers, &session_store).await;
+                cleanup_dead_sessions(&tmux, &session_states, &subscribers, &session_store, &global_broadcast).await;
                 cleanup_empty_subscribers(&subscribers).await;
             }
         }
@@ -433,6 +434,7 @@ async fn cleanup_dead_sessions(
     session_states: &SharedSessionStates,
     subscribers: &SubscriberMap,
     session_store: &Arc<dyn SessionStore>,
+    global_broadcast: &tokio::sync::broadcast::Sender<ServerMessage>,
 ) {
     let tracked_ids: Vec<String> = {
         let states = session_states.read().await;
@@ -468,6 +470,11 @@ async fn cleanup_dead_sessions(
                 if let Err(e) = session_store.remove(&session_id).await {
                     warn!(session = %session_id, error = %e, "Failed to remove ended session from store");
                 }
+
+                // Broadcast SessionDeleted to all connected clients
+                let _ = global_broadcast.send(ServerMessage::SessionDeleted {
+                    session_id: session_id.clone(),
+                });
 
                 info!(session = %session_id, "Session ended, removed from tracking");
             }

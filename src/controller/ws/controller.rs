@@ -22,10 +22,11 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 
 use super::handler::handle_connection;
+use super::messages::ServerMessage;
 use crate::config::Config;
 use crate::controller::SubscriberMap;
 use crate::model::{ModelError, SharedSessionStates};
-use crate::utils::TmuxClient;
+use crate::utils::{SessionStore, TmuxClient};
 
 /// Stop function type
 pub type StopFn = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
@@ -36,6 +37,9 @@ struct WsState {
     tmux: Arc<dyn TmuxClient>,
     session_states: SharedSessionStates,
     subscribers: SubscriberMap,
+    config: Arc<Config>,
+    session_store: Arc<dyn SessionStore>,
+    global_broadcast: tokio::sync::broadcast::Sender<ServerMessage>,
 }
 
 /// Start the WebSocket server
@@ -44,6 +48,8 @@ pub async fn start(
     tmux: Arc<dyn TmuxClient>,
     session_states: SharedSessionStates,
     subscribers: SubscriberMap,
+    session_store: Arc<dyn SessionStore>,
+    global_broadcast: tokio::sync::broadcast::Sender<ServerMessage>,
 ) -> Result<StopFn, ModelError> {
     let addr: SocketAddr = format!("0.0.0.0:{}", config.ws_port)
         .parse()
@@ -54,6 +60,9 @@ pub async fn start(
         tmux,
         session_states,
         subscribers,
+        config: config.clone(),
+        session_store,
+        global_broadcast,
     };
 
     // Build router with configurable CORS
@@ -133,6 +142,14 @@ async fn ws_handler(
     State(state): State<WsState>,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| {
-        handle_connection(socket, state.tmux, state.session_states, state.subscribers)
+        handle_connection(
+            socket,
+            state.tmux,
+            state.session_states,
+            state.subscribers,
+            state.config,
+            state.session_store,
+            state.global_broadcast,
+        )
     })
 }

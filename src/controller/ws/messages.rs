@@ -33,6 +33,49 @@ pub enum ClientMessage {
         cols: u16,
         rows: u16,
     },
+
+    /// Request full session list
+    GetSessions {
+        #[serde(default)]
+        request_id: Option<String>,
+    },
+
+    /// Request single session detail
+    GetSession {
+        session_id: String,
+        #[serde(default)]
+        request_id: Option<String>,
+    },
+
+    /// Create a new session
+    CreateSession {
+        name: String,
+        folder: String,
+        #[serde(default)]
+        prompt: String,
+        #[serde(default)]
+        request_id: Option<String>,
+    },
+
+    /// Delete a session
+    DeleteSession {
+        session_id: String,
+        #[serde(default)]
+        request_id: Option<String>,
+    },
+
+    /// Update session metadata (rename, project, tags)
+    UpdateSession {
+        session_id: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        project_id: Option<Option<String>>,
+        #[serde(default)]
+        tags: Option<Vec<String>>,
+        #[serde(default)]
+        request_id: Option<String>,
+    },
 }
 
 // =============================================================================
@@ -58,7 +101,12 @@ pub enum ServerMessage {
     },
 
     /// Error occurred
-    Error { session_id: String, message: String },
+    Error {
+        session_id: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+    },
 
     /// Session ended (tmux session terminated)
     SessionEnded {
@@ -75,6 +123,47 @@ pub enum ServerMessage {
 
     /// Unsubscription confirmed
     Unsubscribed { session_id: String },
+
+    /// Full session list (response to get_sessions or broadcast on change)
+    Sessions {
+        sessions: Vec<crate::model::types::Session>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+    },
+
+    /// Single session detail with output
+    SessionDetail {
+        session: crate::model::types::Session,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recent_output: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+    },
+
+    /// Broadcast: session was created
+    SessionCreated {
+        session: crate::model::types::Session,
+    },
+
+    /// Broadcast: session was deleted
+    SessionDeleted { session_id: String },
+
+    /// Broadcast: session metadata was updated
+    SessionUpdated {
+        session_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        project_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tags: Vec<String>,
+    },
+
+    /// Acknowledgment for mutations
+    Ack {
+        request_id: String,
+        success: bool,
+    },
 }
 
 // =============================================================================
