@@ -12,6 +12,7 @@ import { XtermTerminal } from '../components/XtermTerminal';
 import { MobileInputBar } from '../components/MobileInputBar';
 import { UploadStatus, useUploadStatus } from '../components/UploadStatus';
 import { FileBrowser } from '../components/FileBrowser';
+import { api } from '../api/client';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
 import { useSessionOutput } from '../hooks/useSessionOutput';
@@ -69,15 +70,36 @@ export function SessionPage() {
   // Terminal font size (zoom)
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
 
-  // Load session metadata from store (reactive — updates when store changes)
+  // Load session metadata from store, with HTTP fallback
+  const fetchedViaHttpRef = useRef(false);
   useEffect(() => {
     if (!decodedId) return;
+
+    // Try store first
     const found = storeSessions.find(s => s.id === decodedId);
     if (found) {
       setSession(found);
       setLoading(false);
+      return;
     }
-  }, [decodedId, storeSessions]);
+
+    // If store doesn't have it and we haven't tried HTTP yet, fetch via API
+    if (!fetchedViaHttpRef.current) {
+      fetchedViaHttpRef.current = true;
+      api.getSession(decodedId)
+        .then(data => {
+          setSession(data.session);
+          setLoading(false);
+        })
+        .catch(err => {
+          const message = err instanceof Error ? err.message : 'Session not found';
+          if (message.toLowerCase().includes('not found')) {
+            navigate('/');
+          }
+          setLoading(false);
+        });
+    }
+  }, [decodedId, storeSessions, navigate]);
 
   // Load projects for the info sheet
   useEffect(() => {
