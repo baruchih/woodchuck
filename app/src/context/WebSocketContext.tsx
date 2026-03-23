@@ -1,5 +1,15 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import type { ServerMessage, OutputMessage, StatusMessage, ErrorMessage, ClientMessage } from '../types';
+import type {
+  ServerMessage, OutputMessage, StatusMessage, ErrorMessage, ClientMessage,
+  SessionsMessage, SessionCreatedMessage, SessionDeletedMessage, SessionUpdatedMessage,
+  SessionEndedMessage,
+} from '../types';
+
+type PendingRequest = {
+  resolve: (msg: unknown) => void;
+  reject: (err: Error) => void;
+  timer: number;
+};
 
 interface WebSocketContextValue {
   connected: boolean;
@@ -11,6 +21,11 @@ interface WebSocketContextValue {
   onOutput: (callback: (msg: OutputMessage) => void) => () => void;
   onStatus: (callback: (msg: StatusMessage) => void) => () => void;
   onError: (callback: (msg: ErrorMessage) => void) => () => void;
+  wsRequest: <T>(msg: ClientMessage) => Promise<T>;
+  onSessions: (cb: (msg: SessionsMessage) => void) => () => void;
+  onSessionCreated: (cb: (msg: SessionCreatedMessage) => void) => () => void;
+  onSessionDeleted: (cb: (msg: SessionDeletedMessage | SessionEndedMessage) => void) => () => void;
+  onSessionUpdated: (cb: (msg: SessionUpdatedMessage) => void) => () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
@@ -36,6 +51,11 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const outputListenersRef = useRef<Set<(msg: OutputMessage) => void>>(new Set());
   const statusListenersRef = useRef<Set<(msg: StatusMessage) => void>>(new Set());
   const errorListenersRef = useRef<Set<(msg: ErrorMessage) => void>>(new Set());
+  const sessionsListenersRef = useRef<Set<(msg: SessionsMessage) => void>>(new Set());
+  const sessionCreatedListenersRef = useRef<Set<(msg: SessionCreatedMessage) => void>>(new Set());
+  const sessionDeletedListenersRef = useRef<Set<(msg: SessionDeletedMessage | SessionEndedMessage) => void>>(new Set());
+  const sessionUpdatedListenersRef = useRef<Set<(msg: SessionUpdatedMessage) => void>>(new Set());
+  const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
   const lastMessageTimeRef = useRef<number>(Date.now());
   const healthCheckRef = useRef<number>();
 
@@ -71,6 +91,13 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     const ws = new WebSocket(url);
 
     ws.onopen = () => {
+      // Reject all pending requests from previous connection
+      pendingRequestsRef.current.forEach((pending) => {
+        clearTimeout(pending.timer);
+        pending.reject(new Error('connection reset'));
+      });
+      pendingRequestsRef.current.clear();
+
       setConnected(true);
       resubscribeAll();
     };
@@ -94,6 +121,16 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       try {
         const msg = JSON.parse(event.data) as ServerMessage;
 
+        // Resolve pending request if this message carries a request_id
+        if ('request_id' in msg && msg.request_id) {
+          const pending = pendingRequestsRef.current.get(msg.request_id);
+          if (pending) {
+            clearTimeout(pending.timer);
+            pendingRequestsRef.current.delete(msg.request_id);
+            pending.resolve(msg);
+          }
+        }
+
         switch (msg.type) {
           case 'output':
             outputListenersRef.current.forEach((cb) => cb(msg));
@@ -103,6 +140,27 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
             break;
           case 'error':
             errorListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'sessions':
+            sessionsListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'session_created':
+            sessionCreatedListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'session_deleted':
+            sessionDeletedListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'session_ended':
+            sessionDeletedListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'session_updated':
+            sessionUpdatedListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'ack':
+            // Already handled above via request_id resolution
+            break;
+          case 'session_detail':
+            // Already handled above via request_id resolution
             break;
         }
       } catch {
@@ -205,6 +263,53 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     };
   }, []);
 
+  const wsRequest = useCallback(<T,>(msg: ClientMessage): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const requestId = crypto.randomUUID();
+      const msgWithId = { ...msg, request_id: requestId };
+
+      const timer = window.setTimeout(() => {
+        pendingRequestsRef.current.delete(requestId);
+        reject(new Error('WebSocket request timed out'));
+      }, 10_000);
+
+      pendingRequestsRef.current.set(requestId, {
+        resolve: resolve as (msg: unknown) => void,
+        reject,
+        timer,
+      });
+
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msgWithId));
+      } else {
+        clearTimeout(timer);
+        pendingRequestsRef.current.delete(requestId);
+        reject(new Error('WebSocket not connected'));
+      }
+    });
+  }, []);
+
+  const onSessions = useCallback((cb: (msg: SessionsMessage) => void) => {
+    sessionsListenersRef.current.add(cb);
+    return () => { sessionsListenersRef.current.delete(cb); };
+  }, []);
+
+  const onSessionCreated = useCallback((cb: (msg: SessionCreatedMessage) => void) => {
+    sessionCreatedListenersRef.current.add(cb);
+    return () => { sessionCreatedListenersRef.current.delete(cb); };
+  }, []);
+
+  const onSessionDeleted = useCallback((cb: (msg: SessionDeletedMessage | SessionEndedMessage) => void) => {
+    sessionDeletedListenersRef.current.add(cb);
+    return () => { sessionDeletedListenersRef.current.delete(cb); };
+  }, []);
+
+  const onSessionUpdated = useCallback((cb: (msg: SessionUpdatedMessage) => void) => {
+    sessionUpdatedListenersRef.current.add(cb);
+    return () => { sessionUpdatedListenersRef.current.delete(cb); };
+  }, []);
+
   const value: WebSocketContextValue = {
     connected,
     subscribe,
@@ -215,6 +320,11 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     onOutput,
     onStatus,
     onError,
+    wsRequest,
+    onSessions,
+    onSessionCreated,
+    onSessionDeleted,
+    onSessionUpdated,
   };
 
   return (

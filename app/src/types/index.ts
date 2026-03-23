@@ -68,6 +68,7 @@ export interface ErrorMessage {
   type: 'error';
   session_id: string;
   message: string;
+  request_id?: string;
 }
 
 export interface SessionEndedMessage {
@@ -76,7 +77,46 @@ export interface SessionEndedMessage {
   timestamp: string;
 }
 
-export type ServerMessage = OutputMessage | StatusMessage | ErrorMessage | SessionEndedMessage;
+export interface SessionsMessage {
+  type: 'sessions';
+  sessions: Session[];
+  request_id?: string;
+}
+
+export interface SessionDetailMessage {
+  type: 'session_detail';
+  session: Session;
+  recent_output?: string;
+  request_id?: string;
+}
+
+export interface SessionCreatedMessage {
+  type: 'session_created';
+  session: Session;
+}
+
+export interface SessionDeletedMessage {
+  type: 'session_deleted';
+  session_id: string;
+}
+
+export interface SessionUpdatedMessage {
+  type: 'session_updated';
+  session_id: string;
+  name?: string;
+  project_id?: string;
+  tags?: string[];
+}
+
+export interface AckMessage {
+  type: 'ack';
+  request_id: string;
+  success: boolean;
+}
+
+export type ServerMessage = OutputMessage | StatusMessage | ErrorMessage | SessionEndedMessage
+  | SessionsMessage | SessionDetailMessage | SessionCreatedMessage | SessionDeletedMessage
+  | SessionUpdatedMessage | AckMessage;
 
 // WebSocket messages - Client to Server
 export interface SubscribeMessage {
@@ -103,7 +143,42 @@ export interface ResizeMessage {
   rows: number;
 }
 
-export type ClientMessage = SubscribeMessage | UnsubscribeMessage | InputMessage | ResizeMessage;
+export interface GetSessionsMessage {
+  type: 'get_sessions';
+  request_id?: string;
+}
+
+export interface GetSessionMessage {
+  type: 'get_session';
+  session_id: string;
+  request_id?: string;
+}
+
+export interface CreateSessionMessage {
+  type: 'create_session';
+  name: string;
+  folder: string;
+  prompt: string;
+  request_id?: string;
+}
+
+export interface DeleteSessionMessage {
+  type: 'delete_session';
+  session_id: string;
+  request_id?: string;
+}
+
+export interface UpdateSessionMessage {
+  type: 'update_session';
+  session_id: string;
+  name?: string;
+  project_id?: string | null;
+  tags?: string[];
+  request_id?: string;
+}
+
+export type ClientMessage = SubscribeMessage | UnsubscribeMessage | InputMessage | ResizeMessage
+  | GetSessionsMessage | GetSessionMessage | CreateSessionMessage | DeleteSessionMessage | UpdateSessionMessage;
 
 // API Response types
 export interface ApiResponse<T> {

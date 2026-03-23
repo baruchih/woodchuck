@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { WebSocketProvider } from './context/WebSocketContext';
+import { SessionStoreProvider } from './context/SessionStoreContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { UpdateBanner } from './components/UpdateBanner';
 import { usePushReregister } from './hooks/usePushReregister';
@@ -24,14 +25,16 @@ export function App() {
       >
         <UpdateBanner />
         <WebSocketProvider>
-          <Routes>
-            <Route path="/" element={<SessionsPage />} />
-            <Route path="/session/:id" element={<SessionPage />} />
-            <Route path="/new" element={<NewSessionPage />} />
-            <Route path="/insult-sword-fight" element={<InsultSwordFightPage />} />
-            <Route path="/multi" element={<MultiSessionPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
+          <SessionStoreProvider>
+            <Routes>
+              <Route path="/" element={<SessionsPage />} />
+              <Route path="/session/:id" element={<SessionPage />} />
+              <Route path="/new" element={<NewSessionPage />} />
+              <Route path="/insult-sword-fight" element={<InsultSwordFightPage />} />
+              <Route path="/multi" element={<MultiSessionPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </SessionStoreProvider>
         </WebSocketProvider>
       </BrowserRouter>
     </ThemeProvider>
