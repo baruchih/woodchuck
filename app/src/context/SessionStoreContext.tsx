@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useWS } from './WebSocketContext';
+import { api } from '../api/client';
 import type { Session, SessionsMessage } from '../types';
 
 interface SessionStoreContextValue {
@@ -63,7 +64,19 @@ export function SessionStoreProvider({ children }: SessionStoreProviderProps) {
         buildSortedList();
       })
       .catch((err) => {
-        console.error('Failed to fetch sessions via WS:', err);
+        console.error('Failed to fetch sessions via WS, falling back to HTTP:', err);
+        // Fallback to HTTP API
+        api.getSessions()
+          .then((data) => {
+            sessionMapRef.current.clear();
+            for (const s of data.sessions) {
+              sessionMapRef.current.set(s.id, s);
+            }
+            buildSortedList();
+          })
+          .catch((httpErr) => {
+            console.error('HTTP fallback also failed:', httpErr);
+          });
       })
       .finally(() => {
         setLoading(false);
