@@ -77,6 +77,13 @@ export interface SessionEndedMessage {
   timestamp: string;
 }
 
+export interface SubscribedMessage {
+  type: 'subscribed';
+  session_id: string;
+  current_output: string;
+  status: string;
+}
+
 export interface SessionsMessage {
   type: 'sessions';
   sessions: Session[];
@@ -115,8 +122,8 @@ export interface AckMessage {
 }
 
 export type ServerMessage = OutputMessage | StatusMessage | ErrorMessage | SessionEndedMessage
-  | SessionsMessage | SessionDetailMessage | SessionCreatedMessage | SessionDeletedMessage
-  | SessionUpdatedMessage | AckMessage;
+  | SubscribedMessage | SessionsMessage | SessionDetailMessage | SessionCreatedMessage
+  | SessionDeletedMessage | SessionUpdatedMessage | AckMessage;
 
 // WebSocket messages - Client to Server
 export interface SubscribeMessage {

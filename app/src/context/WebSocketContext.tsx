@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import type {
   ServerMessage, OutputMessage, StatusMessage, ErrorMessage, ClientMessage,
-  SessionsMessage, SessionCreatedMessage, SessionDeletedMessage, SessionUpdatedMessage,
-  SessionEndedMessage,
+  SubscribedMessage, SessionsMessage, SessionCreatedMessage, SessionDeletedMessage,
+  SessionUpdatedMessage, SessionEndedMessage,
 } from '../types';
 
 type PendingRequest = {
@@ -26,6 +26,7 @@ interface WebSocketContextValue {
   onSessionCreated: (cb: (msg: SessionCreatedMessage) => void) => () => void;
   onSessionDeleted: (cb: (msg: SessionDeletedMessage | SessionEndedMessage) => void) => () => void;
   onSessionUpdated: (cb: (msg: SessionUpdatedMessage) => void) => () => void;
+  onSubscribed: (cb: (msg: SubscribedMessage) => void) => () => void;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
@@ -55,6 +56,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const sessionCreatedListenersRef = useRef<Set<(msg: SessionCreatedMessage) => void>>(new Set());
   const sessionDeletedListenersRef = useRef<Set<(msg: SessionDeletedMessage | SessionEndedMessage) => void>>(new Set());
   const sessionUpdatedListenersRef = useRef<Set<(msg: SessionUpdatedMessage) => void>>(new Set());
+  const subscribedListenersRef = useRef<Set<(msg: SubscribedMessage) => void>>(new Set());
   const pendingRequestsRef = useRef<Map<string, PendingRequest>>(new Map());
   const lastMessageTimeRef = useRef<number>(Date.now());
   const healthCheckRef = useRef<number>();
@@ -155,6 +157,9 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
             break;
           case 'session_updated':
             sessionUpdatedListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'subscribed':
+            subscribedListenersRef.current.forEach((cb) => cb(msg));
             break;
           case 'ack':
             // Already handled above via request_id resolution
@@ -310,6 +315,11 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     return () => { sessionUpdatedListenersRef.current.delete(cb); };
   }, []);
 
+  const onSubscribed = useCallback((cb: (msg: SubscribedMessage) => void) => {
+    subscribedListenersRef.current.add(cb);
+    return () => { subscribedListenersRef.current.delete(cb); };
+  }, []);
+
   const value: WebSocketContextValue = {
     connected,
     subscribe,
@@ -325,6 +335,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     onSessionCreated,
     onSessionDeleted,
     onSessionUpdated,
+    onSubscribed,
   };
 
   return (

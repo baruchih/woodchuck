@@ -3,7 +3,7 @@ import { XtermTerminal } from './XtermTerminal';
 import { SessionInfoSheet } from './SessionInfoSheet';
 import { UploadStatus, useUploadStatus } from './UploadStatus';
 import { FileBrowser } from './FileBrowser';
-import { useTerminal } from '../hooks/useTerminal';
+import { useSessionOutput } from '../hooks/useSessionOutput';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
 import { useSessions } from '../hooks/useSessions';
 import { useWS } from '../context/WebSocketContext';
@@ -20,7 +20,7 @@ interface SessionPaneProps {
 export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove }: SessionPaneProps) {
   const { sendInput, uploadFiles, getSession, deleteSession, renameSession, moveToProject } = useSessions();
   const { resize, sendRawInput } = useWS();
-  const { content, needsAttention, triggerFastPoll, notifySentText, forceRefresh } = useTerminal({ sessionId });
+  const { content, needsAttention, triggerFastPoll, notifySentText, forceRefresh } = useSessionOutput({ sessionId });
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);

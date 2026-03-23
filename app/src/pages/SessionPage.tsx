@@ -14,18 +14,20 @@ import { UploadStatus, useUploadStatus } from '../components/UploadStatus';
 import { FileBrowser } from '../components/FileBrowser';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
-import { useTerminal } from '../hooks/useTerminal';
+import { useSessionOutput } from '../hooks/useSessionOutput';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
 import { useCommands } from '../hooks/useCommands';
 import { useWS } from '../context/WebSocketContext';
+import { useSessionStore } from '../context/SessionStoreContext';
 import type { Session, Command } from '../types';
 
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getSession, deleteSession, sendInput, uploadImage, uploadFiles, renameSession, moveToProject } = useSessions();
+  const { deleteSession, sendInput, uploadImage, uploadFiles, renameSession, moveToProject } = useSessions();
   const { projects, refresh: refreshProjects } = useProjects();
   const { resize, sendRawInput } = useWS();
+  const { getSessionById } = useSessionStore();
 
   const [session, setSession] = useState<Session | null>(null);
   const [inputBuffer, setInputBuffer] = useState('');
@@ -34,7 +36,7 @@ export function SessionPage() {
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [killing, setKilling] = useState(false);
   const [fabCenter, setFabCenter] = useState({ x: 0, y: 0 });
@@ -59,39 +61,37 @@ export function SessionPage() {
 
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // Polling hook
-  const { content, needsAttention, contextActions, triggerFastPoll, notifySentText, forceRefresh } = useTerminal({
+  // WebSocket-based terminal output (replaces HTTP polling)
+  const { content, needsAttention, contextActions, triggerFastPoll, notifySentText, forceRefresh } = useSessionOutput({
     sessionId: decodedId,
   });
 
   // Terminal font size (zoom)
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
 
-  // Load session metadata and projects
+  // Load session metadata from store (no HTTP), and projects for info sheet
   useEffect(() => {
     if (!decodedId) return;
 
-    const loadSession = async () => {
+    const storeSession = getSessionById(decodedId);
+    if (storeSession) {
+      setSession(storeSession);
+      setLoading(false);
+    } else {
+      // Session not in store yet — may still be loading
       setLoading(true);
-      setError(null);
-      try {
-        const data = await getSession(decodedId);
-        setSession(data.session);
-        // Also load projects for the info sheet
-        await refreshProjects();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load session';
-        setError(message);
-        if (message.toLowerCase().includes('not found')) {
-          setTimeout(() => navigate('/'), 2000);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
+    }
+    refreshProjects();
+  }, [decodedId, getSessionById, refreshProjects]);
 
-    loadSession();
-  }, [decodedId, getSession, navigate, refreshProjects]);
+  // Keep session in sync with store updates
+  useEffect(() => {
+    const updated = getSessionById(decodedId);
+    if (updated) {
+      setSession(updated);
+      setLoading(false);
+    }
+  }, [decodedId, getSessionById]);
 
   // ── Input handlers ──
 
