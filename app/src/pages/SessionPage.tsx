@@ -27,7 +27,7 @@ export function SessionPage() {
   const { deleteSession, sendInput, uploadImage, uploadFiles, renameSession, moveToProject } = useSessions();
   const { projects, refresh: refreshProjects } = useProjects();
   const { resize, sendRawInput } = useWS();
-  const { getSessionById } = useSessionStore();
+  const { sessions: storeSessions } = useSessionStore();
 
   const [session, setSession] = useState<Session | null>(null);
   const [inputBuffer, setInputBuffer] = useState('');
@@ -69,29 +69,20 @@ export function SessionPage() {
   // Terminal font size (zoom)
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
 
-  // Load session metadata from store (no HTTP), and projects for info sheet
+  // Load session metadata from store (reactive — updates when store changes)
   useEffect(() => {
     if (!decodedId) return;
-
-    const storeSession = getSessionById(decodedId);
-    if (storeSession) {
-      setSession(storeSession);
+    const found = storeSessions.find(s => s.id === decodedId);
+    if (found) {
+      setSession(found);
       setLoading(false);
-    } else {
-      // Session not in store yet — may still be loading
-      setLoading(true);
     }
-    refreshProjects();
-  }, [decodedId, getSessionById, refreshProjects]);
+  }, [decodedId, storeSessions]);
 
-  // Keep session in sync with store updates
+  // Load projects for the info sheet
   useEffect(() => {
-    const updated = getSessionById(decodedId);
-    if (updated) {
-      setSession(updated);
-      setLoading(false);
-    }
-  }, [decodedId, getSessionById]);
+    refreshProjects();
+  }, [refreshProjects]);
 
   // ── Input handlers ──
 
