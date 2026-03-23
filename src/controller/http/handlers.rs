@@ -1267,8 +1267,8 @@ async fn list_dir_single_level(
     for entry in raw_entries {
         let name = entry.file_name().to_string_lossy().to_string();
 
-        // Skip hidden files/dirs
-        if name.starts_with('.') {
+        // Skip noisy directories but allow hidden files like .env, .zshrc
+        if name == ".git" || name == "node_modules" || name == ".DS_Store" {
             continue;
         }
 
@@ -1339,7 +1339,7 @@ fn search_files_recursive<'a>(
         }
 
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
+        if name == ".git" || name == "node_modules" || name == ".DS_Store" {
             continue;
         }
 
