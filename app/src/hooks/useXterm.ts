@@ -131,14 +131,17 @@ export function useXterm({
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // Initial fit - defer to ensure container has dimensions
-    // Use requestAnimationFrame to wait for layout
-    requestAnimationFrame(() => {
+    // Initial fit - retry a few times to handle layout that isn't ready yet.
+    // On mobile, React may still be rendering when the first rAF fires.
+    let fitAttempts = 0;
+    const tryFit = () => {
+      fitAttempts++;
       try {
-        // Check if container has dimensions before fitting
         const proposedDims = fitAddon.proposeDimensions();
         if (!proposedDims) {
-          console.warn('Container has no dimensions yet, skipping fit');
+          if (fitAttempts < 5) {
+            requestAnimationFrame(tryFit);
+          }
           return;
         }
         fitAddon.fit();
@@ -146,9 +149,12 @@ export function useXterm({
         setDimensions(dims);
         onResize(dims.cols, dims.rows);
       } catch (e) {
-        console.error('Initial fit failed:', e);
+        if (fitAttempts < 5) {
+          requestAnimationFrame(tryFit);
+        }
       }
-    });
+    };
+    requestAnimationFrame(tryFit);
 
     // Handle keyboard input (desktop only — mobile uses a separate input bar)
     const inputDisposable = terminal.onData((data) => {
@@ -197,7 +203,7 @@ export function useXterm({
     }
   }, [fontSize, onResize]);
 
-  // Handle container resize — only refit when WIDTH changes.
+  // Handle container resize — refit when WIDTH changes or on orientation change.
   // Height-only changes (mobile keyboard open/close) should not refit,
   // because refitting triggers a full terminal clear + rewrite which
   // causes a visible jump. The terminal scrolls naturally instead.
@@ -209,13 +215,8 @@ export function useXterm({
 
     let lastWidth = container.clientWidth;
 
-    const observer = new ResizeObserver(() => {
+    const doFit = () => {
       requestAnimationFrame(() => {
-        const currentWidth = container.clientWidth;
-        // Skip height-only changes (keyboard open/close)
-        if (currentWidth === lastWidth) return;
-        lastWidth = currentWidth;
-
         try {
           const proposedDims = fitAddon.proposeDimensions();
           if (!proposedDims) return;
@@ -223,16 +224,32 @@ export function useXterm({
           const dims = { cols: terminal.cols, rows: terminal.rows };
           setDimensions(dims);
           onResize(dims.cols, dims.rows);
+          lastWidth = container.clientWidth;
         } catch (e) {
           console.error('Resize fit failed:', e);
         }
       });
+    };
+
+    const observer = new ResizeObserver(() => {
+      const currentWidth = container.clientWidth;
+      // Skip height-only changes (keyboard open/close)
+      if (currentWidth === lastWidth) return;
+      doFit();
     });
 
     observer.observe(container);
 
+    // Also refit on orientation change (mobile rotate)
+    const handleOrientation = () => doFit();
+    window.addEventListener('orientationchange', handleOrientation);
+    // screen.orientation API (more reliable on some devices)
+    screen.orientation?.addEventListener('change', handleOrientation);
+
     return () => {
       observer.disconnect();
+      window.removeEventListener('orientationchange', handleOrientation);
+      screen.orientation?.removeEventListener('change', handleOrientation);
     };
   }, [onResize]);
 
