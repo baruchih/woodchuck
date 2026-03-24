@@ -13,6 +13,7 @@ type PendingRequest = {
 
 interface WebSocketContextValue {
   connected: boolean;
+  forceReconnect: () => void;
   subscribe: (sessionId: string) => void;
   unsubscribe: (sessionId: string) => void;
   sendInput: (sessionId: string, text: string) => void;
@@ -85,9 +86,20 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   }, [send]);
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return;
+    // Clean up any existing socket (including zombie CONNECTING sockets from backgrounding)
+    const existing = wsRef.current;
+    if (existing) {
+      if (existing.readyState === WebSocket.OPEN) return; // already connected
+      // Kill zombie socket (CONNECTING or CLOSING state)
+      existing.onclose = null; // prevent reconnect loop from old socket's close
+      existing.onerror = null;
+      existing.onmessage = null;
+      existing.close();
+      wsRef.current = null;
     }
+
+    // Clear any pending reconnect timer
+    clearTimeout(reconnectTimeoutRef.current);
 
     const url = getWebSocketUrl();
     const ws = new WebSocket(url);
@@ -187,19 +199,21 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   }, [connect]);
 
   // Health check: detect silent WebSocket disconnections
-  // If we have active subscriptions but haven't received any message in 30s,
-  // the connection is likely dead (half-open TCP). Force reconnect.
+  // If we haven't received any message in 30s and the socket claims to be open,
+  // it's likely a half-open TCP connection. Force reconnect.
   useEffect(() => {
     healthCheckRef.current = window.setInterval(() => {
       const ws = wsRef.current;
-      const hasSubscriptions = subscriptionsRef.current.size > 0;
       const elapsed = Date.now() - lastMessageTimeRef.current;
 
-      if (hasSubscriptions && elapsed > 30_000) {
+      if (elapsed > 30_000) {
         if (ws && ws.readyState === WebSocket.OPEN) {
           console.warn(`WebSocket stale (no message for ${Math.round(elapsed / 1000)}s) — reconnecting`);
           ws.close();
           // onclose handler will trigger reconnect
+        } else if (!ws || ws.readyState === WebSocket.CLOSED) {
+          // Socket died without onclose firing — reconnect
+          connect();
         }
       }
     }, 15_000);
@@ -210,14 +224,19 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   }, []);
 
   // Handle visibility change (phone sleep/background)
-  // Use ref to avoid re-registering on every connected change
-  const connectedRef = useRef(connected);
-  connectedRef.current = connected;
-
+  // iOS Safari aggressively kills WebSocket connections when backgrounded.
+  // Always force a reconnect attempt when the app returns to foreground.
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && !connectedRef.current) {
-        connect();
+      if (document.visibilityState === 'visible') {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          connect();
+        } else {
+          // Connection looks open but may be a zombie — reset the stale timer
+          // so the health check gives it a fresh 30s window
+          lastMessageTimeRef.current = Date.now();
+        }
       }
     };
 
@@ -320,8 +339,22 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     return () => { subscribedListenersRef.current.delete(cb); };
   }, []);
 
+  const forceReconnect = useCallback(() => {
+    const ws = wsRef.current;
+    if (ws) {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.close();
+      wsRef.current = null;
+    }
+    setConnected(false);
+    connect();
+  }, [connect]);
+
   const value: WebSocketContextValue = {
     connected,
+    forceReconnect,
     subscribe,
     unsubscribe,
     sendInput,
