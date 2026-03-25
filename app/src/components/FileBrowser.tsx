@@ -647,11 +647,14 @@ function ImageViewer({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
 
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
+
   const zoomIn = useCallback(() => setScale(s => Math.min(s * 1.3, 10)), []);
   const zoomOut = useCallback(() => setScale(s => Math.max(s / 1.3, 0.1)), []);
   const resetZoom = useCallback(() => setScale(1), []);
 
-  // Pinch-to-zoom on mobile
+  // Pinch-to-zoom on mobile — uses ref to avoid re-registering on every scale change
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -668,7 +671,7 @@ function ImageViewer({
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
         pinchStartDist = getTouchDistance(e.touches[0], e.touches[1]);
-        pinchStartScale = scale;
+        pinchStartScale = scaleRef.current;
       }
     };
 
@@ -694,7 +697,7 @@ function ImageViewer({
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [scale]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-background">
