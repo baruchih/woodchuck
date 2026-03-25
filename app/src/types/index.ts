@@ -248,6 +248,25 @@ export interface DeployStatus {
   pending: boolean;
   last_deploy: string | null;
   cooldown_remaining_secs: number | null;
+  deploy_branch: string;
+  current_git_branch: string | null;
+}
+
+export interface DeploySettings {
+  deploy_branch: string;
+}
+
+export interface DeployEvent {
+  timestamp: string;
+  branch: string;
+  commit: string;
+  outcome: 'success' | 'failed' | 'reverted';
+  outcome_detail?: string;
+  trigger: 'auto' | 'manual' | 'local';
+}
+
+export interface DeployHistoryData {
+  entries: DeployEvent[];
 }
 
 export interface DeployTriggerResult {

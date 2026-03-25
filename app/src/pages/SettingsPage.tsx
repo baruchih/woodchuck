@@ -8,7 +8,7 @@ import { api } from '../api/client';
 import { ansiToHtml } from '../utils/ansi';
 import { useTheme } from '../context/ThemeContext';
 import { truncatePath } from '../utils/path';
-import type { Project, MaintainerStatus, DeployStatus } from '../types';
+import type { Project, MaintainerStatus, DeployStatus, DeployEvent } from '../types';
 
 // Storage key for hidden projects
 const HIDDEN_PROJECTS_KEY = 'woodchuck-hidden-projects';
@@ -63,6 +63,11 @@ export function SettingsPage() {
   // Deploy state
   const [deployStatus, setDeployStatus] = useState<DeployStatus | null>(null);
   const [deploying, setDeploying] = useState(false);
+  const [deployBranchInput, setDeployBranchInput] = useState('');
+  const [savingBranch, setSavingBranch] = useState(false);
+  const [deployHistory, setDeployHistory] = useState<DeployEvent[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [deployingLocal, setDeployingLocal] = useState(false);
 
   // Initial load
   useEffect(() => {
@@ -70,6 +75,7 @@ export function SettingsPage() {
     refreshTemplates();
     refreshMaintainerStatus();
     refreshDeployStatus();
+    refreshDeployHistory();
   }, [refreshProjects, refreshTemplates]);
 
   // Poll maintainer + deploy status every 5s
@@ -157,10 +163,22 @@ export function SettingsPage() {
     }
   };
 
+  const refreshDeployHistory = async () => {
+    try {
+      const data = await api.getDeployHistory();
+      setDeployHistory(data.entries);
+    } catch {
+      // ignore
+    }
+  };
+
   const refreshDeployStatus = async () => {
     try {
       const status = await api.getDeployStatus();
       setDeployStatus(status);
+      if (status.deploy_branch && !deployBranchInput) {
+        setDeployBranchInput(status.deploy_branch);
+      }
       // Reset deploying flag if server is back and not pending
       // (deploy succeeded — server re-exec'd)
       if (deploying && !status.pending) {
@@ -191,6 +209,32 @@ export function SettingsPage() {
       await refreshDeployStatus();
     } catch (e) {
       console.error('Failed to abort deploy:', e);
+    }
+  };
+
+  const handleSaveBranch = async () => {
+    const branch = deployBranchInput.trim();
+    if (!branch || savingBranch) return;
+    setSavingBranch(true);
+    try {
+      await api.updateDeploySettings({ deploy_branch: branch });
+      await refreshDeployStatus();
+    } catch (e) {
+      console.error('Failed to save deploy branch:', e);
+    } finally {
+      setSavingBranch(false);
+    }
+  };
+
+  const handleDeployLocal = async () => {
+    if (deployingLocal) return;
+    setDeployingLocal(true);
+    try {
+      await api.deployLocal();
+      await refreshDeployHistory();
+    } catch (e) {
+      console.error('Deploy local failed:', e);
+      setDeployingLocal(false);
     }
   };
 
@@ -425,8 +469,49 @@ export function SettingsPage() {
             Self-upgrade pipeline. Swaps binary and restarts with 60s abort window.
           </p>
 
+          {/* Auto-revert banner */}
+          {deployHistory.length > 0 && deployHistory[0].outcome === 'reverted' && (
+            <div className="bg-status-error/10 border border-status-error rounded-sm p-3 mb-4">
+              <p className="text-status-error text-xs font-medium">
+                Auto-reverted to main after consecutive failures on branch &quot;{deployHistory[0].branch}&quot;
+              </p>
+              <p className="text-text-muted text-[10px] mt-1">
+                {new Date(deployHistory[0].timestamp).toLocaleString()}
+                {deployHistory[0].outcome_detail && ` — ${deployHistory[0].outcome_detail}`}
+              </p>
+            </div>
+          )}
+
           {deployStatus ? (
             <div className="space-y-3">
+              {/* Branch configuration */}
+              <div className="px-3 py-3 bg-surface border border-border rounded-sm">
+                <label className="text-xs text-text-muted uppercase tracking-wider">Deploy Branch</label>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <input
+                    type="text"
+                    value={deployBranchInput}
+                    onChange={(e) => setDeployBranchInput(e.target.value)}
+                    className="flex-1 bg-background border border-border rounded-sm px-2 py-1 text-sm text-text font-mono focus:outline-none focus:border-primary"
+                    placeholder="main"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleSaveBranch}
+                    disabled={savingBranch || deployBranchInput.trim() === deployStatus.deploy_branch}
+                  >
+                    {savingBranch ? 'Saving...' : 'Save'}
+                  </Button>
+                </div>
+                {deployStatus.current_git_branch && (
+                  <p className="text-[10px] text-text-muted mt-1">
+                    Currently on: <span className="font-mono">{deployStatus.current_git_branch}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Status + actions */}
               <div className="flex items-center justify-between px-3 py-3 bg-surface border border-border rounded-sm">
                 <div>
                   <span className={`text-sm font-medium ${deployStatus.pending ? 'text-status-working' : 'text-text'}`}>
@@ -450,12 +535,16 @@ export function SettingsPage() {
                     </Button>
                   ) : (
                     <>
+                      <Button variant="ghost" size="sm" onClick={handleRollback}>
+                        Rollback
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={handleRollback}
+                        onClick={handleDeployLocal}
+                        disabled={deployingLocal}
                       >
-                        Rollback
+                        {deployingLocal ? 'Building...' : 'Deploy Local'}
                       </Button>
                       <Button
                         variant="primary"
@@ -468,6 +557,48 @@ export function SettingsPage() {
                     </>
                   )}
                 </div>
+              </div>
+
+              {/* Deploy history */}
+              <div>
+                <button
+                  onClick={() => { setShowHistory(!showHistory); if (!showHistory) refreshDeployHistory(); }}
+                  className="text-xs text-text-muted hover:text-primary uppercase tracking-wider"
+                >
+                  {showHistory ? 'Hide History' : 'Show History'}
+                </button>
+                {showHistory && (
+                  <div className="mt-2 border border-border rounded-sm overflow-hidden">
+                    {deployHistory.length === 0 ? (
+                      <p className="text-xs text-text-muted p-3">No deploy history</p>
+                    ) : (
+                      deployHistory.map((event, i) => (
+                        <div key={i} className="flex items-center justify-between px-3 py-2 border-b border-border/50 last:border-0 text-xs">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`font-medium ${
+                                event.outcome === 'success' ? 'text-status-resting' :
+                                event.outcome === 'failed' ? 'text-status-error' :
+                                'text-status-needs-input'
+                              }`}>
+                                {event.outcome}
+                              </span>
+                              <span className="text-text-muted font-mono">{event.branch}</span>
+                              <span className="text-text-muted font-mono">{event.commit.slice(0, 7)}</span>
+                            </div>
+                            {event.outcome_detail && (
+                              <p className="text-text-muted text-[10px] mt-0.5 truncate">{event.outcome_detail}</p>
+                            )}
+                          </div>
+                          <div className="text-text-muted shrink-0 ml-2 text-right">
+                            <div>{event.trigger}</div>
+                            <div className="text-[10px]">{new Date(event.timestamp).toLocaleString()}</div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ) : (

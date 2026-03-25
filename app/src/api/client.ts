@@ -1,4 +1,4 @@
-import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeployTriggerResult, DeployAbortResult, SessionFilesData, FileContentData, OrphanedSession } from '../types';
+import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeploySettings, DeployHistoryData, DeployTriggerResult, DeployAbortResult, SessionFilesData, FileContentData, OrphanedSession } from '../types';
 
 const BASE_URL = '/api';
 
@@ -216,6 +216,21 @@ export const api = {
 
   rollbackDeploy: (): Promise<DeployTriggerResult> =>
     request('/deploy/rollback', { method: 'POST' }),
+
+  getDeploySettings: (): Promise<DeploySettings> =>
+    request('/deploy/settings'),
+
+  updateDeploySettings: (settings: { deploy_branch: string }): Promise<DeploySettings> =>
+    request('/deploy/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    }),
+
+  getDeployHistory: (): Promise<DeployHistoryData> =>
+    request('/deploy/history'),
+
+  deployLocal: (): Promise<DeployTriggerResult> =>
+    request('/deploy/local', { method: 'POST' }),
 
   uploadProject: (name: string, file: File, onProgress?: ProgressCallback): Promise<{ path: string }> => {
     const formData = new FormData();
