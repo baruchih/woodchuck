@@ -30,6 +30,15 @@ function isViewable(name: string): boolean {
   return VIEWABLE_EXTENSIONS.has(ext);
 }
 
+const IMAGE_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico',
+]);
+
+function isImage(name: string): boolean {
+  const ext = name.toLowerCase().split('.').pop() || '';
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -42,7 +51,7 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
   const [root, setRoot] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewingFile, setViewingFile] = useState<{ path: string; name: string } | null>(null);
+  const [viewingFile, setViewingFile] = useState<{ path: string; name: string; image?: boolean } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -199,8 +208,10 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
                       key={entry.path}
                       className="flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-surface cursor-pointer group"
                       onClick={() => {
-                        if (isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024)) {
-                          setViewingFile({ path: entry.path, name: entry.name });
+                        const textOk = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
+                        const imgOk = isImage(entry.name) && (entry.size == null || entry.size <= 20 * 1024 * 1024);
+                        if (textOk || imgOk) {
+                          setViewingFile({ path: entry.path, name: entry.name, image: imgOk });
                         }
                       }}
                     >
@@ -240,8 +251,16 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
       </div>
 
       {/* File viewer overlay */}
-      {viewingFile && (
+      {viewingFile && !viewingFile.image && (
         <FileViewer
+          sessionId={sessionId}
+          path={viewingFile.path}
+          name={viewingFile.name}
+          onClose={() => setViewingFile(null)}
+        />
+      )}
+      {viewingFile && viewingFile.image && (
+        <ImageViewer
           sessionId={sessionId}
           path={viewingFile.path}
           name={viewingFile.name}
@@ -261,7 +280,7 @@ function FileNode({
   entry: FileEntry;
   depth: number;
   sessionId: string;
-  onView: (file: { path: string; name: string }) => void;
+  onView: (file: { path: string; name: string; image?: boolean }) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileEntry[] | null>(null);
@@ -339,13 +358,15 @@ function FileNode({
   }
 
   const downloadUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(entry.path)}`;
-  const canView = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
+  const canViewText = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
+  const canViewImage = isImage(entry.name) && (entry.size == null || entry.size <= 20 * 1024 * 1024);
+  const canView = canViewText || canViewImage;
 
   return (
     <div
       className={`flex items-center gap-1.5 py-1 px-2 rounded hover:bg-surface group ${canView ? 'cursor-pointer' : ''}`}
       style={{ paddingLeft: paddingLeft + 12 + 6 }}
-      onClick={canView ? () => onView({ path: entry.path, name: entry.name }) : undefined}
+      onClick={canView ? () => onView({ path: entry.path, name: entry.name, image: canViewImage }) : undefined}
     >
       {/* File icon */}
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-text-muted shrink-0">
@@ -358,7 +379,7 @@ function FileNode({
         <button
           className="shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
           aria-label={`View ${entry.name}`}
-          onClick={(e) => { e.stopPropagation(); onView({ path: entry.path, name: entry.name }); }}
+          onClick={(e) => { e.stopPropagation(); onView({ path: entry.path, name: entry.name, image: canViewImage }); }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -589,6 +610,80 @@ function FileViewer({
             >{content}</pre>
           )
         )}
+      </div>
+    </div>
+  );
+}
+
+function ImageViewer({
+  sessionId,
+  path,
+  name,
+  onClose,
+}: {
+  sessionId: string;
+  path: string;
+  name: string;
+  onClose: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const imgUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
+  const downloadUrl = imgUrl;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-background">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text shrink-0 p-0.5"
+            aria-label="Back"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <span className="text-sm font-medium text-text truncate">{name}</span>
+        </div>
+        <a
+          href={downloadUrl}
+          download={name}
+          className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Download
+        </a>
+      </div>
+
+      {/* Image */}
+      <div className="flex-1 overflow-auto flex items-center justify-center p-4">
+        {loading && !error && (
+          <svg className="w-5 h-5 animate-spin text-primary absolute" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        )}
+        {error && (
+          <p className="text-status-error text-sm">Failed to load image</p>
+        )}
+        <img
+          src={imgUrl}
+          alt={name}
+          className={`max-w-full max-h-full object-contain ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+          onLoad={() => setLoading(false)}
+          onError={() => { setLoading(false); setError(true); }}
+        />
+      </div>
+
+      {/* Path */}
+      <div className="px-3 py-1.5 border-t border-border shrink-0">
+        <span className="text-[10px] text-text-muted truncate block">{path}</span>
       </div>
     </div>
   );
