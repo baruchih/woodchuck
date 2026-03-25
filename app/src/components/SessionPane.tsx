@@ -74,7 +74,8 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   }, [inputText, sending, sessionId, sendInput, triggerFastPoll, notifySentText]);
 
   const handleSlashSelect = useCallback((command: Command) => {
-    setInputText(`/${command.name} `);
+    const newText = command.name.startsWith('/') ? `${command.name} ` : `/${command.name} `;
+    setInputText(newText);
     setSlashSelectedIndex(0);
     textareaRef.current?.focus();
   }, []);

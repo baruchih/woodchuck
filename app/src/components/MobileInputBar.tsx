@@ -45,7 +45,7 @@ export function MobileInputBar({
   }, [text, sending, onSend]);
 
   const handleSlashSelect = useCallback((command: Command) => {
-    const newText = `/${command.name} `;
+    const newText = command.name.startsWith('/') ? `${command.name} ` : `/${command.name} `;
     setText(newText);
     setSlashSelectedIndex(0);
     inputRef.current?.focus();
