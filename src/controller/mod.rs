@@ -7,6 +7,7 @@
 //! - **poller**: Background task for polling tmux sessions
 
 pub mod deploy;
+pub mod deploy_settings;
 pub mod http;
 pub mod maintainer;
 pub mod poller;
@@ -264,6 +265,7 @@ async fn start_maintainer(
         deploy: deploy_state,
         push,
         last_commit_file: std::path::PathBuf::from(&config.data_dir).join("last-deploy-commit"),
+        data_dir: std::path::PathBuf::from(&config.data_dir),
     };
 
     let ralph_config = ralph::RalphConfig {

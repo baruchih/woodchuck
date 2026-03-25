@@ -12,7 +12,8 @@ use serde::Deserialize;
 use tracing::{debug, info, instrument, warn};
 
 use super::response::{
-    err, err_msg, ApiResponse, CommandsData, DeployAbortData, DeployStatusData, DeployTriggerData,
+    err, err_msg, ApiResponse, CommandsData, DeployAbortData, DeployEventResponse,
+    DeployHistoryData, DeploySettingsData, DeployStatusData, DeployTriggerData,
     DiscardedSessionData, FileContentData, FileEntry, FolderCreatedData, FoldersData, HealthData,
     HookData, InboxItemData, InputSentData, MaintainerStatusData, OrphanedSessionData,
     OrphanedSessionsData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
@@ -850,10 +851,19 @@ pub async fn deploy_status_handler(
     State(state): State<AppState>,
 ) -> Json<ApiResponse<DeployStatusData>> {
     let status = state.deploy.status();
+    let settings = crate::controller::deploy_settings::load_settings(&state.config.data_dir).await;
+
+    let repo_dir = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let current_git_branch = crate::utils::git::detect_git_branch(&repo_dir).await;
+
     ApiResponse::ok(DeployStatusData {
         pending: status.pending,
         last_deploy: status.last_deploy,
         cooldown_remaining_secs: status.cooldown_remaining_secs,
+        deploy_branch: settings.deploy_branch,
+        current_git_branch,
     })
 }
 
@@ -930,6 +940,134 @@ pub async fn deploy_rollback_handler(
             }))
         }
         Err(msg) => Err(err_msg(StatusCode::BAD_REQUEST, &msg, "ROLLBACK_FAILED")),
+    }
+}
+
+// =============================================================================
+// Deploy Settings & History
+// =============================================================================
+
+/// Request body for updating deploy settings
+#[derive(Debug, Deserialize)]
+pub struct UpdateDeploySettingsParams {
+    pub deploy_branch: String,
+}
+
+/// GET /deploy/settings - Get deploy settings
+#[instrument(skip(state))]
+pub async fn deploy_settings_handler(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<DeploySettingsData>> {
+    let settings = crate::controller::deploy_settings::load_settings(&state.config.data_dir).await;
+    ApiResponse::ok(DeploySettingsData {
+        deploy_branch: settings.deploy_branch,
+    })
+}
+
+/// POST /deploy/settings - Update deploy settings
+#[instrument(skip(state))]
+pub async fn update_deploy_settings_handler(
+    State(state): State<AppState>,
+    Json(params): Json<UpdateDeploySettingsParams>,
+) -> Result<Json<ApiResponse<DeploySettingsData>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let branch = params.deploy_branch.trim().to_string();
+
+    // Validate branch name
+    if branch.is_empty() {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Branch name cannot be empty", "INVALID_INPUT"));
+    }
+    if branch.len() > 100 {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Branch name too long (max 100 chars)", "INVALID_INPUT"));
+    }
+    if !branch.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/' || c == '.') {
+        return Err(err_msg(
+            StatusCode::BAD_REQUEST,
+            "Branch name contains invalid characters (only alphanumeric, -, _, /, . allowed)",
+            "INVALID_INPUT",
+        ));
+    }
+
+    let settings = crate::controller::deploy_settings::DeploySettings {
+        deploy_branch: branch.clone(),
+    };
+    crate::controller::deploy_settings::save_settings(&state.config.data_dir, &settings).await;
+
+    info!(branch = %branch, "Updated deploy branch");
+    Ok(ApiResponse::ok(DeploySettingsData {
+        deploy_branch: branch,
+    }))
+}
+
+/// GET /deploy/history - Get deploy history
+#[instrument(skip(state))]
+pub async fn deploy_history_handler(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<DeployHistoryData>> {
+    let history = crate::controller::deploy_settings::load_history(&state.config.data_dir).await;
+
+    let entries: Vec<DeployEventResponse> = history
+        .entries
+        .iter()
+        .map(|e| {
+            let (outcome, outcome_detail) = match &e.outcome {
+                crate::controller::deploy_settings::DeployOutcome::Success => {
+                    ("success".to_string(), None)
+                }
+                crate::controller::deploy_settings::DeployOutcome::Failed(reason) => {
+                    ("failed".to_string(), Some(reason.clone()))
+                }
+                crate::controller::deploy_settings::DeployOutcome::Reverted(reason) => {
+                    ("reverted".to_string(), Some(reason.clone()))
+                }
+            };
+            let trigger = match &e.trigger {
+                crate::controller::deploy_settings::DeployTrigger::Auto => "auto".to_string(),
+                crate::controller::deploy_settings::DeployTrigger::Manual => "manual".to_string(),
+                crate::controller::deploy_settings::DeployTrigger::Local => "local".to_string(),
+            };
+            DeployEventResponse {
+                timestamp: e.timestamp.to_rfc3339(),
+                branch: e.branch.clone(),
+                commit: e.commit.clone(),
+                outcome,
+                outcome_detail,
+                trigger,
+            }
+        })
+        .collect();
+
+    ApiResponse::ok(DeployHistoryData { entries })
+}
+
+/// POST /deploy/local - Build and deploy from current working tree
+#[instrument(skip(state))]
+pub async fn deploy_local_handler(
+    State(state): State<AppState>,
+) -> Result<Json<ApiResponse<DeployTriggerData>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let repo_dir = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| state.config.projects_dir.clone());
+
+    match crate::controller::ralph::deploy_local(
+        &repo_dir,
+        &state.deploy,
+        &state.push,
+        &state.config.data_dir,
+    )
+    .await
+    {
+        Ok(message) => {
+            // Spawn re-exec after delay to ensure HTTP response is flushed
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                super::super::deploy::re_exec();
+            });
+            Ok(ApiResponse::ok(DeployTriggerData {
+                result: "restarting".to_string(),
+                message,
+            }))
+        }
+        Err(e) => Err(err_msg(StatusCode::BAD_REQUEST, &e, "DEPLOY_FAILED")),
     }
 }
 

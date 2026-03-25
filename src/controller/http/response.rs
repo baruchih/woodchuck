@@ -321,6 +321,31 @@ pub struct DeployStatusData {
     pub pending: bool,
     pub last_deploy: Option<String>,
     pub cooldown_remaining_secs: Option<i64>,
+    pub deploy_branch: String,
+    pub current_git_branch: Option<String>,
+}
+
+/// Deploy settings response
+#[derive(Debug, Serialize)]
+pub struct DeploySettingsData {
+    pub deploy_branch: String,
+}
+
+/// Deploy history response
+#[derive(Debug, Serialize)]
+pub struct DeployHistoryData {
+    pub entries: Vec<DeployEventResponse>,
+}
+
+/// Single deploy event in history response
+#[derive(Debug, Serialize)]
+pub struct DeployEventResponse {
+    pub timestamp: String,
+    pub branch: String,
+    pub commit: String,
+    pub outcome: String,
+    pub outcome_detail: Option<String>,
+    pub trigger: String,
 }
 
 /// Deploy trigger response

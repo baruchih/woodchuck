@@ -152,6 +152,117 @@ pub async fn get_head_commit(folder: &str) -> Option<String> {
 }
 
 // =============================================================================
+// Standalone Git Utilities (used by deploy system)
+// =============================================================================
+
+/// Timeout for fetch/checkout/pull operations
+const GIT_OP_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Fetch a specific branch from origin.
+pub async fn git_fetch_branch(repo_dir: &str, branch: &str) -> Result<(), String> {
+    let output = tokio::time::timeout(
+        GIT_OP_TIMEOUT,
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("fetch")
+            .arg("origin")
+            .arg(branch)
+            .output(),
+    )
+    .await
+    .map_err(|_| format!("git fetch timed out after {}s", GIT_OP_TIMEOUT.as_secs()))?
+    .map_err(|e| format!("Failed to spawn git fetch: {}", e))?;
+
+    if output.status.success() {
+        debug!(repo = %repo_dir, branch = %branch, "Fetched branch from origin");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git fetch failed: {}", stderr.trim()))
+    }
+}
+
+/// Checkout a branch and pull latest changes from origin.
+pub async fn git_checkout_and_pull(repo_dir: &str, branch: &str) -> Result<(), String> {
+    // Checkout
+    let output = tokio::time::timeout(
+        GIT_OP_TIMEOUT,
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("checkout")
+            .arg(branch)
+            .output(),
+    )
+    .await
+    .map_err(|_| format!("git checkout timed out after {}s", GIT_OP_TIMEOUT.as_secs()))?
+    .map_err(|e| format!("Failed to spawn git checkout: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git checkout failed: {}", stderr.trim()));
+    }
+    debug!(repo = %repo_dir, branch = %branch, "Checked out branch");
+
+    // Pull
+    let output = tokio::time::timeout(
+        GIT_OP_TIMEOUT,
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("pull")
+            .arg("origin")
+            .arg(branch)
+            .output(),
+    )
+    .await
+    .map_err(|_| format!("git pull timed out after {}s", GIT_OP_TIMEOUT.as_secs()))?
+    .map_err(|e| format!("Failed to spawn git pull: {}", e))?;
+
+    if output.status.success() {
+        debug!(repo = %repo_dir, branch = %branch, "Pulled latest from origin");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("git pull failed: {}", stderr.trim()))
+    }
+}
+
+/// Get the commit hash of `origin/{branch}`.
+pub async fn get_remote_head_commit(repo_dir: &str, branch: &str) -> Option<String> {
+    if repo_dir.is_empty() || branch.is_empty() {
+        return None;
+    }
+
+    let ref_name = format!("origin/{}", branch);
+    let output = tokio::time::timeout(
+        BRANCH_TIMEOUT,
+        Command::new("git")
+            .arg("-C")
+            .arg(repo_dir)
+            .arg("rev-parse")
+            .arg(&ref_name)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if hash.is_empty() {
+        None
+    } else {
+        debug!(repo = %repo_dir, branch = %branch, hash = %hash, "Got remote HEAD commit");
+        Some(hash)
+    }
+}
+
+// =============================================================================
 // Mock Implementation for Tests
 // =============================================================================
 

@@ -16,7 +16,8 @@ use tower_http::services::{ServeDir, ServeFile};
 use super::handlers::{
     create_folder_handler, create_project_handler, create_session_handler,
     create_template_handler, delete_project_handler, delete_session_handler,
-    delete_template_handler, deploy_abort_handler, deploy_rollback_handler,
+    delete_template_handler, deploy_abort_handler, deploy_history_handler,
+    deploy_local_handler, deploy_rollback_handler, deploy_settings_handler,
     deploy_status_handler, deploy_trigger_handler, discard_orphaned_handler,
     download_file_handler, file_content_handler, get_session_handler, health_handler,
     hook_handler, list_commands_handler, list_folders_handler, list_orphaned_handler,
@@ -24,7 +25,8 @@ use super::handlers::{
     maintainer_inbox_handler, maintainer_pause_handler, maintainer_resume_handler,
     maintainer_status_handler, poll_handler, push_subscribe_handler,
     push_unsubscribe_handler, recover_session_handler, rename_project_handler,
-    resize_handler, send_input_handler, session_files_handler, update_session_handler,
+    resize_handler, send_input_handler, session_files_handler,
+    update_deploy_settings_handler, update_session_handler,
     upload_files_handler, upload_image_handler, upload_project_handler, vapid_key_handler,
 };
 use super::rate_limit::{RateLimiter, rate_limit_middleware};
@@ -52,7 +54,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/push/vapid-key", get(vapid_key_handler))
         .route("/commands", get(list_commands_handler))
         .route("/maintainer/status", get(maintainer_status_handler))
-        .route("/deploy/status", get(deploy_status_handler));
+        .route("/deploy/status", get(deploy_status_handler))
+        .route("/deploy/settings", get(deploy_settings_handler))
+        .route("/deploy/history", get(deploy_history_handler));
 
     // Upload routes — higher body limit (100 MB), rate limited
     let upload_routes = Router::new()
@@ -86,6 +90,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/deploy/trigger", post(deploy_trigger_handler))
         .route("/deploy/abort", post(deploy_abort_handler))
         .route("/deploy/rollback", post(deploy_rollback_handler))
+        .route("/deploy/settings", post(update_deploy_settings_handler))
+        .route("/deploy/local", post(deploy_local_handler))
         .route_layer(middleware::from_fn_with_state(write_limiter, rate_limit_middleware));
 
     let api_router = Router::new()

@@ -13,6 +13,9 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn, error};
 
 use crate::controller::deploy::{DeployResult, DeployState};
+use crate::controller::deploy_settings::{
+    self, DeployEvent, DeployOutcome, DeployTrigger,
+};
 use crate::model::{SessionStatus, SharedSessionStates};
 use crate::utils::{TmuxClient, WebPushClient};
 
@@ -43,6 +46,8 @@ pub struct AutoDeployConfig {
     pub push: Arc<dyn WebPushClient>,
     /// Path to store the last-deployed commit hash
     pub last_commit_file: PathBuf,
+    /// Data directory for deploy settings/history
+    pub data_dir: PathBuf,
 }
 
 impl std::fmt::Debug for AutoDeployConfig {
@@ -307,6 +312,8 @@ pub fn start_ralph_loop(
 }
 
 /// Check if the repo has new commits since last deploy, and if so build + deploy.
+/// Now branch-aware: reads deploy settings for the target branch, fetches from
+/// origin, and auto-reverts to main after consecutive failures.
 async fn maybe_auto_deploy(config: &RalphConfig) {
     let ad = match &config.auto_deploy {
         Some(ad) => ad,
@@ -319,11 +326,21 @@ async fn maybe_auto_deploy(config: &RalphConfig) {
         return;
     }
 
-    // Check current HEAD
-    let head = match crate::utils::git::get_head_commit(&ad.repo_dir).await {
+    let data_dir = ad.data_dir.to_string_lossy().to_string();
+    let settings = deploy_settings::load_settings(&data_dir).await;
+    let branch = &settings.deploy_branch;
+
+    // Fetch the remote branch
+    if let Err(e) = crate::utils::git::git_fetch_branch(&ad.repo_dir, branch).await {
+        warn!(session = %config.session_id, branch = %branch, error = %e, "Failed to fetch branch");
+        return;
+    }
+
+    // Get the remote HEAD for this branch
+    let remote_head = match crate::utils::git::get_remote_head_commit(&ad.repo_dir, branch).await {
         Some(h) => h,
         None => {
-            debug!(session = %config.session_id, "Could not get HEAD commit");
+            debug!(session = %config.session_id, branch = %branch, "Could not get remote HEAD commit");
             return;
         }
     };
@@ -334,25 +351,96 @@ async fn maybe_auto_deploy(config: &RalphConfig) {
         .ok()
         .map(|s| s.trim().to_string());
 
-    if last_deployed.as_deref() == Some(&head) {
-        debug!(session = %config.session_id, commit = %head, "No new commits since last deploy");
+    if last_deployed.as_deref() == Some(&remote_head) {
+        debug!(session = %config.session_id, commit = %remote_head, branch = %branch, "No new commits since last deploy");
         return;
     }
 
     info!(
         session = %config.session_id,
-        head = %head,
+        branch = %branch,
+        remote_head = %remote_head,
         last_deployed = ?last_deployed,
-        "New commits detected, starting auto-build"
+        "New commits detected, checking out branch and starting auto-build"
     );
 
+    // Checkout the branch and pull
+    if let Err(e) = crate::utils::git::git_checkout_and_pull(&ad.repo_dir, branch).await {
+        warn!(session = %config.session_id, branch = %branch, error = %e, "Failed to checkout/pull branch");
+        return;
+    }
+
     // Build frontend + backend
-    match run_full_build(&ad.repo_dir).await {
+    let build_result = run_full_build(&ad.repo_dir).await;
+
+    match build_result {
         Ok(()) => {
             info!(session = %config.session_id, "Full build succeeded, triggering deploy");
         }
-        Err(e) => {
-            warn!(session = %config.session_id, error = %e, "Auto-build failed, skipping deploy");
+        Err(ref e) => {
+            warn!(session = %config.session_id, error = %e, "Auto-build failed");
+
+            // Record the failure
+            deploy_settings::append_history(
+                &data_dir,
+                DeployEvent {
+                    timestamp: chrono::Utc::now(),
+                    branch: branch.to_string(),
+                    commit: remote_head.clone(),
+                    outcome: DeployOutcome::Failed(e.clone()),
+                    trigger: DeployTrigger::Auto,
+                },
+            )
+            .await;
+
+            // Check if we should auto-revert to main
+            let history = deploy_settings::load_history(&data_dir).await;
+            if deploy_settings::should_auto_revert(&history, branch) {
+                warn!(
+                    session = %config.session_id,
+                    branch = %branch,
+                    "Too many consecutive failures, reverting to main"
+                );
+
+                // Revert settings to main
+                let reverted_settings = deploy_settings::DeploySettings {
+                    deploy_branch: "main".to_string(),
+                };
+                deploy_settings::save_settings(&data_dir, &reverted_settings).await;
+
+                // Record the revert event
+                deploy_settings::append_history(
+                    &data_dir,
+                    DeployEvent {
+                        timestamp: chrono::Utc::now(),
+                        branch: branch.to_string(),
+                        commit: remote_head.clone(),
+                        outcome: DeployOutcome::Reverted(format!(
+                            "Auto-reverted after {} consecutive failures",
+                            deploy_settings::consecutive_failures_on_branch(&history, branch)
+                        )),
+                        trigger: DeployTrigger::Auto,
+                    },
+                )
+                .await;
+
+                // Send push notification about the revert
+                let payload = serde_json::json!({
+                    "title": "Woodchuck Auto-Revert",
+                    "body": format!("Branch '{}' reverted to 'main' after consecutive deploy failures.", branch),
+                    "type": "deploy_reverted",
+                });
+                if let Err(e) = ad.push.send_to_all(&payload.to_string()).await {
+                    warn!(error = %e, "Failed to send auto-revert notification");
+                }
+
+                // Checkout main and trigger a new build cycle (next loop iteration)
+                if let Err(e) = crate::utils::git::git_fetch_branch(&ad.repo_dir, "main").await {
+                    warn!(error = %e, "Failed to fetch main after revert");
+                }
+                let _ = crate::utils::git::git_checkout_and_pull(&ad.repo_dir, "main").await;
+            }
+
             return;
         }
     }
@@ -362,8 +450,22 @@ async fn maybe_auto_deploy(config: &RalphConfig) {
     match &result {
         DeployResult::ReExec { .. } => {
             // Record the deployed commit before re-exec
-            let _ = tokio::fs::write(&ad.last_commit_file, &head).await;
-            info!(session = %config.session_id, commit = %head, "Auto-deploy successful, re-execing");
+            let _ = tokio::fs::write(&ad.last_commit_file, &remote_head).await;
+
+            // Record success
+            deploy_settings::append_history(
+                &data_dir,
+                DeployEvent {
+                    timestamp: chrono::Utc::now(),
+                    branch: branch.to_string(),
+                    commit: remote_head.clone(),
+                    outcome: DeployOutcome::Success,
+                    trigger: DeployTrigger::Auto,
+                },
+            )
+            .await;
+
+            info!(session = %config.session_id, commit = %remote_head, branch = %branch, "Auto-deploy successful, re-execing");
             // Small delay to let logs flush, then re-exec
             tokio::time::sleep(Duration::from_secs(2)).await;
             crate::controller::deploy::re_exec();
@@ -373,9 +475,141 @@ async fn maybe_auto_deploy(config: &RalphConfig) {
         }
         DeployResult::Failed(msg) => {
             warn!(session = %config.session_id, error = %msg, "Auto-deploy failed");
+
+            // Record the failure
+            deploy_settings::append_history(
+                &data_dir,
+                DeployEvent {
+                    timestamp: chrono::Utc::now(),
+                    branch: branch.to_string(),
+                    commit: remote_head.clone(),
+                    outcome: DeployOutcome::Failed(msg.clone()),
+                    trigger: DeployTrigger::Auto,
+                },
+            )
+            .await;
+
+            // Check auto-revert
+            let history = deploy_settings::load_history(&data_dir).await;
+            if deploy_settings::should_auto_revert(&history, branch) {
+                warn!(
+                    session = %config.session_id,
+                    branch = %branch,
+                    "Too many consecutive failures, reverting to main"
+                );
+
+                let reverted_settings = deploy_settings::DeploySettings {
+                    deploy_branch: "main".to_string(),
+                };
+                deploy_settings::save_settings(&data_dir, &reverted_settings).await;
+
+                deploy_settings::append_history(
+                    &data_dir,
+                    DeployEvent {
+                        timestamp: chrono::Utc::now(),
+                        branch: branch.to_string(),
+                        commit: remote_head.clone(),
+                        outcome: DeployOutcome::Reverted(format!(
+                            "Auto-reverted after {} consecutive failures",
+                            deploy_settings::consecutive_failures_on_branch(&history, branch)
+                        )),
+                        trigger: DeployTrigger::Auto,
+                    },
+                )
+                .await;
+
+                let payload = serde_json::json!({
+                    "title": "Woodchuck Auto-Revert",
+                    "body": format!("Branch '{}' reverted to 'main' after consecutive deploy failures.", branch),
+                    "type": "deploy_reverted",
+                });
+                if let Err(e) = ad.push.send_to_all(&payload.to_string()).await {
+                    warn!(error = %e, "Failed to send auto-revert notification");
+                }
+
+                if let Err(e) = crate::utils::git::git_fetch_branch(&ad.repo_dir, "main").await {
+                    warn!(error = %e, "Failed to fetch main after revert");
+                }
+                let _ = crate::utils::git::git_checkout_and_pull(&ad.repo_dir, "main").await;
+            }
         }
         DeployResult::RateLimited { next_allowed } => {
             debug!(session = %config.session_id, next = %next_allowed, "Auto-deploy rate limited");
+        }
+    }
+}
+
+/// Deploy from the current working tree (for manual/local deploys).
+pub async fn deploy_local(
+    repo_dir: &str,
+    deploy: &DeployState,
+    push: &Arc<dyn WebPushClient>,
+    data_dir: &str,
+) -> Result<String, String> {
+    // Get current HEAD for history recording
+    let head = crate::utils::git::get_head_commit(repo_dir)
+        .await
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let branch = crate::utils::git::detect_git_branch(repo_dir)
+        .await
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Build
+    if let Err(e) = run_full_build(repo_dir).await {
+        // Record failure
+        deploy_settings::append_history(
+            data_dir,
+            DeployEvent {
+                timestamp: chrono::Utc::now(),
+                branch,
+                commit: head,
+                outcome: DeployOutcome::Failed(e.clone()),
+                trigger: DeployTrigger::Local,
+            },
+        )
+        .await;
+        return Err(e);
+    }
+
+    // Execute deploy
+    let result = deploy.execute(push).await;
+    match result {
+        DeployResult::ReExec { .. } => {
+            // Record success
+            deploy_settings::append_history(
+                data_dir,
+                DeployEvent {
+                    timestamp: chrono::Utc::now(),
+                    branch,
+                    commit: head,
+                    outcome: DeployOutcome::Success,
+                    trigger: DeployTrigger::Local,
+                },
+            )
+            .await;
+
+            Ok("Build succeeded, deploying...".to_string())
+        }
+        DeployResult::Aborted => {
+            Err("Deploy was aborted during countdown".to_string())
+        }
+        DeployResult::Failed(msg) => {
+            deploy_settings::append_history(
+                data_dir,
+                DeployEvent {
+                    timestamp: chrono::Utc::now(),
+                    branch,
+                    commit: head,
+                    outcome: DeployOutcome::Failed(msg.clone()),
+                    trigger: DeployTrigger::Local,
+                },
+            )
+            .await;
+            Err(msg)
+        }
+        DeployResult::RateLimited { next_allowed } => {
+            Err(format!("Deploy rate limited. Next allowed: {}", next_allowed.to_rfc3339()))
         }
     }
 }
