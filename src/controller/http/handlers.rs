@@ -1579,6 +1579,109 @@ pub async fn download_file_handler(
     ))
 }
 
+/// GET /sessions/:id/download-folder?path=relative/path — download folder as zip
+#[instrument(skip(state))]
+pub async fn download_folder_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiResponse<()>>)> {
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+
+    let root = std::path::PathBuf::from(&session.folder);
+    if !root.is_dir() {
+        return Err(err_msg(StatusCode::NOT_FOUND, "Session folder not found", "FOLDER_NOT_FOUND"));
+    }
+
+    let requested = root.join(&query.path);
+    let canonical = requested.canonicalize().map_err(|_| {
+        err_msg(StatusCode::NOT_FOUND, "Directory not found", "DIR_NOT_FOUND")
+    })?;
+    let canonical_root = root.canonicalize().map_err(|_| {
+        err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Could not resolve folder", "IO_ERROR")
+    })?;
+
+    if !canonical.starts_with(&canonical_root) {
+        return Err(err_msg(StatusCode::FORBIDDEN, "Path outside session folder", "FORBIDDEN"));
+    }
+
+    if !canonical.is_dir() {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Path is not a directory", "INVALID_INPUT"));
+    }
+
+    let folder_name = canonical
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    // Build zip in memory
+    let zip_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        use std::io::Write;
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(buf);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        fn add_dir(
+            zip: &mut zip::ZipWriter<std::io::Cursor<Vec<u8>>>,
+            base: &std::path::Path,
+            dir: &std::path::Path,
+            options: zip::write::SimpleFileOptions,
+            depth: usize,
+        ) -> Result<(), String> {
+            if depth > 10 { return Ok(()); }
+            let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+            for entry in entries {
+                let entry = entry.map_err(|e| e.to_string())?;
+                let name = entry.file_name().to_string_lossy().to_string();
+                // Skip .git, node_modules, .DS_Store
+                if name == ".git" || name == "node_modules" || name == ".DS_Store" { continue; }
+
+                let path = entry.path();
+                let relative = path.strip_prefix(base).unwrap_or(&path).to_string_lossy().to_string();
+                let metadata = entry.metadata().map_err(|e| e.to_string())?;
+
+                if metadata.is_dir() {
+                    zip.add_directory(&format!("{}/", relative), options).map_err(|e| e.to_string())?;
+                    add_dir(zip, base, &path, options, depth + 1)?;
+                } else if metadata.len() <= 50 * 1024 * 1024 { // skip files > 50MB
+                    zip.start_file(&relative, options).map_err(|e| e.to_string())?;
+                    let data = std::fs::read(&path).map_err(|e| e.to_string())?;
+                    zip.write_all(&data).map_err(|e| e.to_string())?;
+                }
+            }
+            Ok(())
+        }
+
+        let base = canonical.clone();
+        add_dir(&mut zip, &base, &canonical, options, 0)?;
+        let buf = zip.finish().map_err(|e| e.to_string())?;
+        Ok(buf.into_inner())
+    })
+    .await
+    .map_err(|_| err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Zip task failed", "INTERNAL_ERROR"))?
+    .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to create zip: {}", e), "IO_ERROR"))?;
+
+    let zip_name = format!("{}.zip", folder_name);
+
+    debug!(session = %session_id, path = %query.path, size = zip_bytes.len(), "Serving folder download");
+
+    Ok((
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "application/zip".to_string()),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", zip_name),
+            ),
+        ],
+        zip_bytes,
+    ))
+}
+
 /// Max file size for in-browser viewing (2 MB)
 const MAX_VIEW_SIZE: u64 = 2 * 1024 * 1024;
 

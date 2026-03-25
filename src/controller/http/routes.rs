@@ -19,7 +19,7 @@ use super::handlers::{
     delete_template_handler, deploy_abort_handler, deploy_history_handler,
     deploy_local_handler, deploy_rollback_handler, deploy_settings_handler,
     deploy_status_handler, deploy_trigger_handler, discard_orphaned_handler,
-    download_file_handler, file_content_handler, get_session_handler, health_handler,
+    download_file_handler, download_folder_handler, file_content_handler, get_session_handler, health_handler,
     hook_handler, list_commands_handler, list_folders_handler, list_orphaned_handler,
     list_projects_handler, list_sessions_handler, list_templates_handler,
     maintainer_inbox_handler, maintainer_pause_handler, maintainer_resume_handler,
@@ -47,6 +47,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/:id/poll", get(poll_handler))
         .route("/sessions/:id/files", get(session_files_handler))
         .route("/sessions/:id/download", get(download_file_handler))
+        .route("/sessions/:id/download-folder", get(download_folder_handler))
         .route("/sessions/:id/file-content", get(file_content_handler))
         .route("/folders", get(list_folders_handler))
         .route("/projects", get(list_projects_handler))
