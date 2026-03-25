@@ -1,13 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { XtermTerminal } from './XtermTerminal';
 import { SessionInfoSheet } from './SessionInfoSheet';
+import { SlashCommandMenu, useSlashCommandState } from './SlashCommandMenu';
 import { UploadStatus, useUploadStatus } from './UploadStatus';
 import { FileBrowser } from './FileBrowser';
 import { useSessionOutput } from '../hooks/useSessionOutput';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
+import { useCommands } from '../hooks/useCommands';
 import { useSessions } from '../hooks/useSessions';
 import { useWS } from '../context/WebSocketContext';
-import type { Session } from '../types';
+import type { Session, Command } from '../types';
 
 interface SessionPaneProps {
   sessionId: string;
@@ -24,6 +26,9 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const { commands } = useCommands(sessionId);
+  const { showMenu: showSlashMenu, filteredCommands } = useSlashCommandState(inputText, commands);
   const { uploadStatus, setUploading, setUploadProgress, setUploadResult } = useUploadStatus();
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showInfoSheet, setShowInfoSheet] = useState(false);
@@ -68,12 +73,42 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
     }
   }, [inputText, sending, sessionId, sendInput, triggerFastPoll, notifySentText]);
 
+  const handleSlashSelect = useCallback((command: Command) => {
+    setInputText(`/${command.name} `);
+    setSlashSelectedIndex(0);
+    textareaRef.current?.focus();
+  }, []);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (showSlashMenu && filteredCommands.length > 0) {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashSelectedIndex(prev => prev <= 0 ? filteredCommands.length - 1 : prev - 1);
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashSelectedIndex(prev => prev >= filteredCommands.length - 1 ? 0 : prev + 1);
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const cmd = filteredCommands[slashSelectedIndex];
+        if (cmd) handleSlashSelect(cmd);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setInputText('');
+        setSlashSelectedIndex(0);
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  }, [handleSend]);
+  }, [handleSend, showSlashMenu, filteredCommands, slashSelectedIndex, handleSlashSelect]);
 
   const handleSendKey = useCallback(async (key: string) => {
     try {
@@ -185,7 +220,14 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       </div>
 
       {/* Compact input bar */}
-      <div className="flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
+      <div className="relative flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
+        <SlashCommandMenu
+          open={showSlashMenu}
+          commands={filteredCommands}
+          selectedIndex={slashSelectedIndex}
+          onSelect={handleSlashSelect}
+          onClose={() => { setInputText(''); setSlashSelectedIndex(0); }}
+        />
         <button
           onClick={(e) => { e.stopPropagation(); handleUploadFiles(); }}
           disabled={uploadStatus.uploading}
@@ -204,7 +246,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         <textarea
           ref={textareaRef}
           value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          onChange={(e) => { setInputText(e.target.value); setSlashSelectedIndex(0); }}
           onKeyDown={handleKeyDown}
           onFocus={onFocus}
           placeholder={focused ? 'Type here...' : 'Click to focus'}
