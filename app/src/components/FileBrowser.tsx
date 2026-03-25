@@ -644,7 +644,9 @@ function ImageViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [scale, setScale] = useState(1);
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
   const imgUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
 
   const scaleRef = useRef(scale);
@@ -747,25 +749,36 @@ function ImageViewer({
       </div>
 
       {/* Image */}
-      <div ref={containerRef} className="flex-1 overflow-auto flex items-center justify-center p-4">
-        {loading && !error && (
-          <svg className="w-5 h-5 animate-spin text-primary absolute" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-        )}
-        {error && (
-          <p className="text-status-error text-sm">Failed to load image</p>
-        )}
-        <img
-          src={imgUrl}
-          alt={name}
-          className={`object-contain ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
-          style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}
-          onLoad={() => setLoading(false)}
-          onError={() => { setLoading(false); setError(true); }}
-          draggable={false}
-        />
+      <div ref={containerRef} className="flex-1 overflow-auto p-4">
+        <div className="min-w-full min-h-full flex items-center justify-center">
+          {loading && !error && (
+            <svg className="w-5 h-5 animate-spin text-primary absolute" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          )}
+          {error && (
+            <p className="text-status-error text-sm">Failed to load image</p>
+          )}
+          <img
+            ref={imgRef}
+            src={imgUrl}
+            alt={name}
+            className={`${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+            style={naturalSize ? {
+              width: `${naturalSize.w * scale}px`,
+              height: `${naturalSize.h * scale}px`,
+              objectFit: 'contain',
+            } : { maxWidth: '100%', maxHeight: '100%' }}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+              setLoading(false);
+            }}
+            onError={() => { setLoading(false); setError(true); }}
+            draggable={false}
+          />
+        </div>
       </div>
 
       {/* Path */}
