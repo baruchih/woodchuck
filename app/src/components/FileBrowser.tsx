@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { marked } from 'marked';
 import { api } from '../api/client';
 import type { FileEntry } from '../types';
@@ -643,8 +643,58 @@ function ImageViewer({
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [scale, setScale] = useState(1);
+  const containerRef = useRef<HTMLDivElement>(null);
   const imgUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(path)}`;
-  const downloadUrl = imgUrl;
+
+  const zoomIn = useCallback(() => setScale(s => Math.min(s * 1.3, 10)), []);
+  const zoomOut = useCallback(() => setScale(s => Math.max(s / 1.3, 0.1)), []);
+  const resetZoom = useCallback(() => setScale(1), []);
+
+  // Pinch-to-zoom on mobile
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let pinchStartDist = 0;
+    let pinchStartScale = 1;
+
+    function getTouchDistance(t1: Touch, t2: Touch): number {
+      const dx = t1.clientX - t2.clientX;
+      const dy = t1.clientY - t2.clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        pinchStartDist = getTouchDistance(e.touches[0], e.touches[1]);
+        pinchStartScale = scale;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchStartDist > 0) {
+        e.preventDefault();
+        const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
+        const newScale = Math.min(Math.max(pinchStartScale * (currentDist / pinchStartDist), 0.1), 10);
+        setScale(newScale);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      pinchStartDist = 0;
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [scale]);
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-background">
@@ -662,22 +712,39 @@ function ImageViewer({
           </button>
           <span className="text-sm font-medium text-text truncate">{name}</span>
         </div>
-        <a
-          href={downloadUrl}
-          download={name}
-          className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Download
-        </a>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={zoomOut}
+            className="px-1.5 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
+            title="Zoom out"
+          >-</button>
+          <button
+            onClick={resetZoom}
+            className="px-1.5 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors min-w-[3rem] text-center"
+            title="Reset zoom"
+          >{Math.round(scale * 100)}%</button>
+          <button
+            onClick={zoomIn}
+            className="px-1.5 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
+            title="Zoom in"
+          >+</button>
+          <a
+            href={imgUrl}
+            download={name}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download
+          </a>
+        </div>
       </div>
 
       {/* Image */}
-      <div className="flex-1 overflow-auto flex items-center justify-center p-4">
+      <div ref={containerRef} className="flex-1 overflow-auto flex items-center justify-center p-4">
         {loading && !error && (
           <svg className="w-5 h-5 animate-spin text-primary absolute" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -690,9 +757,11 @@ function ImageViewer({
         <img
           src={imgUrl}
           alt={name}
-          className={`max-w-full max-h-full object-contain ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+          className={`object-contain ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+          style={{ transform: `scale(${scale})`, transformOrigin: 'center center' }}
           onLoad={() => setLoading(false)}
           onError={() => { setLoading(false); setError(true); }}
+          draggable={false}
         />
       </div>
 
