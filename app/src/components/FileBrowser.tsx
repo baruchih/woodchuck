@@ -749,36 +749,71 @@ function ImageViewer({
       </div>
 
       {/* Image */}
-      <div ref={containerRef} className="flex-1 overflow-auto p-4">
-        <div className="min-w-full min-h-full flex items-center justify-center">
-          {loading && !error && (
-            <svg className="w-5 h-5 animate-spin text-primary absolute" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <div ref={containerRef} className="flex-1 overflow-auto">
+        {loading && !error && (
+          <div className="flex items-center justify-center h-full">
+            <svg className="w-5 h-5 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-          )}
-          {error && (
+          </div>
+        )}
+        {error && (
+          <div className="flex items-center justify-center h-full">
             <p className="text-status-error text-sm">Failed to load image</p>
-          )}
+          </div>
+        )}
+        {naturalSize && (() => {
+          // Compute "fit" dimensions: image size when it fits the container at scale=1
+          const cw = containerRef.current?.clientWidth ?? 300;
+          const ch = containerRef.current?.clientHeight ?? 300;
+          const pad = 32; // 16px padding each side
+          const availW = cw - pad;
+          const availH = ch - pad;
+          const fitScale = Math.min(availW / naturalSize.w, availH / naturalSize.h, 1);
+          const fitW = naturalSize.w * fitScale;
+          const fitH = naturalSize.h * fitScale;
+          // Zoomed dimensions
+          const zoomedW = fitW * scale;
+          const zoomedH = fitH * scale;
+
+          return (
+            <div
+              style={{
+                minWidth: '100%',
+                minHeight: '100%',
+                width: zoomedW > (cw - pad) ? `${zoomedW + pad}px` : '100%',
+                height: zoomedH > (ch - pad) ? `${zoomedH + pad}px` : '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <img
+                ref={imgRef}
+                src={imgUrl}
+                alt={name}
+                className="transition-opacity opacity-100"
+                style={{ width: `${zoomedW}px`, height: `${zoomedH}px`, objectFit: 'contain' }}
+                draggable={false}
+              />
+            </div>
+          );
+        })()}
+        {/* Hidden img to measure natural size */}
+        {!naturalSize && (
           <img
-            ref={imgRef}
             src={imgUrl}
-            alt={name}
-            className={`${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
-            style={naturalSize ? {
-              width: `${naturalSize.w * scale}px`,
-              height: `${naturalSize.h * scale}px`,
-              objectFit: 'contain',
-            } : { maxWidth: '100%', maxHeight: '100%' }}
+            alt=""
+            className="opacity-0 absolute pointer-events-none"
             onLoad={(e) => {
               const img = e.currentTarget;
               setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
               setLoading(false);
             }}
             onError={() => { setLoading(false); setError(true); }}
-            draggable={false}
           />
-        </div>
+        )}
       </div>
 
       {/* Path */}
