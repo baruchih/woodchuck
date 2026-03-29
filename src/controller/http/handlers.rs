@@ -195,6 +195,84 @@ pub async fn delete_session_handler(
     Ok(ApiResponse::ok(SessionKilledData { killed: true }))
 }
 
+/// POST /sessions/:id/restart - Restart a session with claude --continue
+#[instrument(skip(state))]
+pub async fn restart_session_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> ApiResult<SessionCreatedData> {
+    // Get the session info (folder) before killing
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+    let folder = session.folder.clone();
+
+    // Kill the existing tmux session
+    crate::model::delete_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+
+    // Small delay to let tmux clean up
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Respawn with claude --continue in the same folder
+    let cmd = "claude --continue";
+    state.tmux.new_session(&session_id, &folder, cmd)
+        .await
+        .map_err(err)?;
+
+    // Update session state to Working
+    {
+        let mut states = state.session_states.write().await;
+        if let Some(ss) = states.get_mut(&session_id) {
+            ss.status = crate::model::SessionStatus::Working;
+            ss.working_since = Some(chrono::Utc::now());
+        }
+    }
+
+    // Re-inject hooks (non-fatal)
+    if let Err(e) = crate::utils::inject_hooks(&session_id, &folder, &state.config.external_url).await {
+        warn!(session = %session_id, error = %e, "Hook re-injection failed during restart");
+    }
+
+    // Persist updated state
+    {
+        let states = state.session_states.read().await;
+        if let Some(ss) = states.get(&session_id) {
+            let persisted = ss.to_persisted();
+            if let Err(e) = state.session_store.save(&session_id, &persisted).await {
+                warn!(session = %session_id, error = %e, "Failed to persist restarted state");
+            }
+        }
+    }
+
+    // Build response session
+    let git_branch = crate::utils::detect_git_branch(&folder).await;
+    let now = chrono::Utc::now();
+    let name = {
+        let states = state.session_states.read().await;
+        states.get(&session_id).map(|s| s.name.clone()).unwrap_or_default()
+    };
+
+    let restarted = crate::model::types::Session {
+        id: session_id.clone(),
+        name,
+        folder,
+        git_branch,
+        status: crate::model::SessionStatus::Working,
+        created_at: now,
+        updated_at: now,
+        working_since: Some(now),
+        project_id: session.project_id,
+        last_input: session.last_input,
+        last_input_at: session.last_input_at,
+        tags: session.tags,
+    };
+
+    info!(session = %session_id, "Restarted session with claude --continue");
+    Ok(ApiResponse::ok(SessionCreatedData { session: restarted }))
+}
+
 /// Maximum length for stored last_input (truncated if longer)
 const LAST_INPUT_MAX_LENGTH: usize = 500;
 

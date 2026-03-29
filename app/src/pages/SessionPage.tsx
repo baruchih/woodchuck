@@ -25,7 +25,7 @@ import type { Session, Command } from '../types';
 export function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { deleteSession, sendInput, uploadImage, uploadFiles, renameSession, moveToProject } = useSessions();
+  const { deleteSession, restartSession, sendInput, uploadImage, uploadFiles, renameSession, moveToProject } = useSessions();
   const { projects, refresh: refreshProjects } = useProjects();
   const { resize, sendRawInput } = useWS();
   const { sessions: storeSessions } = useSessionStore();
@@ -589,6 +589,7 @@ export function SessionPage() {
           content={content}
           onClose={handleCloseInfo}
           onDelete={handleDeleteFromInfo}
+          onRestart={restartSession}
           onRename={handleRenameSession}
           onMoveToProject={handleMoveToProject}
         />

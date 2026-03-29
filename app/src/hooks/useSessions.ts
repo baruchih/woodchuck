@@ -10,6 +10,7 @@ interface UseSessionsReturn {
   getSession: (id: string) => Promise<SessionWithOutput>;
   createSession: (params: CreateSessionParams) => Promise<Session>;
   deleteSession: (id: string) => Promise<void>;
+  restartSession: (id: string) => Promise<void>;
   renameSession: (id: string, name: string) => Promise<void>;
   moveToProject: (id: string, projectId: string | null) => Promise<void>;
   updateTags: (id: string, tags: string[]) => Promise<void>;
@@ -56,6 +57,10 @@ export function useSessions(): UseSessionsReturn {
     await refresh();
   }, [refresh]);
 
+  const restartSession = useCallback(async (id: string): Promise<void> => {
+    await api.restartSession(id);
+  }, []);
+
   const renameSession = useCallback(async (id: string, name: string): Promise<void> => {
     await api.renameSession(id, name);
     // Refresh the sessions list after renaming
@@ -100,6 +105,7 @@ export function useSessions(): UseSessionsReturn {
     getSession,
     createSession,
     deleteSession,
+    restartSession,
     renameSession,
     moveToProject,
     updateTags,

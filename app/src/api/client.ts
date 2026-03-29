@@ -87,6 +87,11 @@ export const api = {
       method: 'DELETE'
     }),
 
+  restartSession: (id: string): Promise<{ session: Session }> =>
+    request(`/sessions/${encodeURIComponent(id)}/restart`, {
+      method: 'POST',
+    }),
+
   updateSession: (id: string, params: { name?: string; project_id?: string | null; tags?: string[] }): Promise<{ name?: string; project_id?: string; tags?: string[] }> =>
     request(`/sessions/${encodeURIComponent(id)}`, {
       method: 'PATCH',

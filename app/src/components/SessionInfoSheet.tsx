@@ -10,6 +10,7 @@ interface SessionInfoSheetProps {
   content?: string;
   onClose: () => void;
   onDelete: (sessionId: string) => void;
+  onRestart?: (sessionId: string) => void;
   onRename?: (sessionId: string, newName: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
   onUpdateTags?: (sessionId: string, tags: string[]) => void;
@@ -51,6 +52,7 @@ export function SessionInfoSheet({
   content,
   onClose,
   onDelete,
+  onRestart,
   onRename,
   onMoveToProject,
   onUpdateTags,
@@ -561,8 +563,18 @@ export function SessionInfoSheet({
             </Button>
           </div>
 
-          {/* Delete button */}
-          <div className="pt-4 border-t border-border">
+          {/* Restart + Delete */}
+          <div className="pt-4 border-t border-border space-y-2">
+            {onRestart && (
+              <Button variant="ghost" size="sm" onClick={() => { if (session) { onRestart(session.id); onClose(); } }} className="w-full">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-2">
+                  <polyline points="23 4 23 10 17 10" />
+                  <polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+                Restart Session
+              </Button>
+            )}
             <Button variant="danger" size="sm" onClick={handleDelete} className="w-full">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
