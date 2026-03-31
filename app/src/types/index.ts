@@ -13,6 +13,7 @@ export interface Session {
   last_input?: string;
   last_input_at?: string;
   tags?: string[];
+  ralph_enabled?: boolean;
 }
 
 export interface OrphanedSession {
@@ -113,6 +114,7 @@ export interface SessionUpdatedMessage {
   name?: string;
   project_id?: string;
   tags?: string[];
+  ralph_enabled?: boolean;
 }
 
 export interface AckMessage {
@@ -181,6 +183,7 @@ export interface UpdateSessionMessage {
   name?: string;
   project_id?: string | null;
   tags?: string[];
+  ralph_enabled?: boolean;
   request_id?: string;
 }
 

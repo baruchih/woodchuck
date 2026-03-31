@@ -92,7 +92,7 @@ export const api = {
       method: 'POST',
     }),
 
-  updateSession: (id: string, params: { name?: string; project_id?: string | null; tags?: string[] }): Promise<{ name?: string; project_id?: string; tags?: string[] }> =>
+  updateSession: (id: string, params: { name?: string; project_id?: string | null; tags?: string[]; ralph_enabled?: boolean }): Promise<{ name?: string; project_id?: string; tags?: string[]; ralph_enabled?: boolean }> =>
     request(`/sessions/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(params),

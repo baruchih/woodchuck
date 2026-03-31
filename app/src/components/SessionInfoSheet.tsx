@@ -563,6 +563,38 @@ export function SessionInfoSheet({
             </Button>
           </div>
 
+          {/* Auto-Pilot (Ralph) */}
+          <div>
+            <label className="text-xs text-text-muted uppercase tracking-wider">Auto-Pilot</label>
+            <div className="mt-1.5 flex items-center justify-between bg-surface border border-border rounded-sm px-3 py-2.5">
+              <div>
+                <span className="text-text text-sm">
+                  {session.ralph_enabled ? 'Enabled' : 'Disabled'}
+                </span>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  Auto-responds to y/n prompts and trust dialogs
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!session) return;
+                  try {
+                    await api.updateSession(session.id, { ralph_enabled: !session.ralph_enabled });
+                  } catch (e) {
+                    console.error('Failed to toggle auto-pilot:', e);
+                  }
+                }}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${
+                  session.ralph_enabled ? 'bg-primary' : 'bg-border'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white transform transition-transform ${
+                  session.ralph_enabled ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
+            </div>
+          </div>
+
           {/* Restart + Delete */}
           <div className="pt-4 border-t border-border space-y-2">
             {onRestart && (

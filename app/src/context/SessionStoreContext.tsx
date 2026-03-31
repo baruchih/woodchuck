@@ -114,6 +114,7 @@ export function SessionStoreProvider({ children }: SessionStoreProviderProps) {
         if (msg.name !== undefined) updated.name = msg.name;
         if (msg.project_id !== undefined) updated.project_id = msg.project_id;
         if (msg.tags !== undefined) updated.tags = msg.tags;
+        if (msg.ralph_enabled !== undefined) updated.ralph_enabled = msg.ralph_enabled;
         sessionMapRef.current.set(msg.session_id, updated);
         buildSortedList();
       }

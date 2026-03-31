@@ -225,6 +225,9 @@ export function SessionCard({ session, onClick, onDelete, onNewInFolder, onRenam
           size="sm"
           workingSince={session.working_since}
         />
+        {session.ralph_enabled && (
+          <span className="text-[10px] text-primary font-medium uppercase tracking-wider">autopilot</span>
+        )}
         <span className="text-text-muted text-xs">
           {formatRelativeTime(session.updated_at)}
         </span>
