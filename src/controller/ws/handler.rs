@@ -195,10 +195,10 @@ pub async fn handle_connection(
                     &tx, &tmux, &session_states, &session_store, &global_broadcast,
                 ).await;
             }
-            ClientMessage::UpdateSession { session_id, name, project_id, tags, request_id } => {
+            ClientMessage::UpdateSession { session_id, name, project_id, tags, ralph_enabled, request_id } => {
                 handle_update_session(
-                    &session_id, name, project_id, tags, request_id,
-                    &tx, &tmux, &session_states, &session_store, &global_broadcast,
+                    &session_id, name, project_id, tags, ralph_enabled, request_id,
+                    &tx, &tmux, &config, &session_states, &session_store, &global_broadcast,
                 ).await;
             }
         }
@@ -443,6 +443,7 @@ async fn handle_get_sessions(
             session.last_input = ss.last_input.clone();
             session.last_input_at = ss.last_input_at;
             session.tags = ss.tags.clone();
+            session.ralph_enabled = ss.ralph_enabled;
             if !ss.name.is_empty() {
                 session.name = ss.name.clone();
             }
@@ -487,6 +488,7 @@ async fn handle_get_session(
             session.last_input = ss.last_input.clone();
             session.last_input_at = ss.last_input_at;
             session.tags = ss.tags.clone();
+            session.ralph_enabled = ss.ralph_enabled;
             if !ss.name.is_empty() {
                 session.name = ss.name.clone();
             }
@@ -614,9 +616,11 @@ async fn handle_update_session(
     name: Option<String>,
     project_id: Option<Option<String>>,
     tags: Option<Vec<String>>,
+    ralph_enabled: Option<bool>,
     request_id: Option<String>,
     tx: &mpsc::Sender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
+    _config: &Arc<crate::config::Config>,
     session_states: &SharedSessionStates,
     session_store: &Arc<dyn SessionStore>,
     global_broadcast: &tokio::sync::broadcast::Sender<ServerMessage>,
@@ -655,7 +659,7 @@ async fn handle_update_session(
     }
 
     // Update session_states
-    let (final_name, final_project_id, final_tags) = {
+    let (final_name, final_project_id, final_tags, final_ralph_enabled) = {
         let mut states = session_states.write().await;
         let ss = states.entry(session_id.to_string()).or_insert_with(|| {
             crate::model::SessionState::default()
@@ -673,17 +677,22 @@ async fn handle_update_session(
             ss.tags = new_tags.clone();
         }
 
+        if let Some(re) = ralph_enabled {
+            ss.ralph_enabled = re;
+        }
+
         let persisted = ss.to_persisted();
         let final_name = if ss.name.is_empty() { None } else { Some(ss.name.clone()) };
         let final_project_id = ss.project_id.clone();
         let final_tags = ss.tags.clone();
+        let final_ralph_enabled = if ralph_enabled.is_some() { ralph_enabled } else { None };
 
         // Persist full state
         if let Err(e) = session_store.save(session_id, &persisted).await {
             warn!(session = %session_id, error = %e, "Failed to persist updated session");
         }
 
-        (final_name, final_project_id, final_tags)
+        (final_name, final_project_id, final_tags, final_ralph_enabled)
     };
 
     // Send ack to requesting client
@@ -700,5 +709,6 @@ async fn handle_update_session(
         name: final_name,
         project_id: final_project_id,
         tags: final_tags,
+        ralph_enabled: final_ralph_enabled,
     });
 }

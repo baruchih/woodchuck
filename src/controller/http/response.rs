@@ -172,6 +172,8 @@ pub struct SessionUpdatedData {
     pub project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ralph_enabled: Option<bool>,
 }
 
 /// Input sent response

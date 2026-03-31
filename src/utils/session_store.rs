@@ -74,6 +74,10 @@ pub struct PersistedSessionState {
     /// Project folder path (needed for session recovery after crash/power outage)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+
+    /// Whether a per-session ralph loop is enabled
+    #[serde(default)]
+    pub ralph_enabled: bool,
 }
 
 /// Persisted project state (stored to disk)
@@ -630,6 +634,7 @@ mod tests {
             tags: Vec::new(),
             last_notified_status: None,
             folder: None,
+            ralph_enabled: false,
         };
         let state2 = PersistedSessionState::with_name("Second Session".to_string());
 
@@ -722,6 +727,7 @@ mod tests {
                 tags: Vec::new(),
                 last_notified_status: None,
                 folder: None,
+                ralph_enabled: false,
             };
             store.save("persistent-1", &state).await.unwrap();
         }

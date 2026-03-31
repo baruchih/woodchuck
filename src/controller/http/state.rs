@@ -42,8 +42,8 @@ pub struct AppState {
     /// Session state persistence store
     pub session_store: Arc<dyn SessionStore>,
 
-    /// Ralph loop handle for the maintainer (if running)
-    pub ralph_handle: Arc<tokio::sync::RwLock<Option<Arc<RalphHandle>>>>,
+    /// Ralph loop handles keyed by session ID
+    pub ralph_handles: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<RalphHandle>>>>,
 
     /// Deploy pipeline state
     pub deploy: DeployState,
@@ -76,23 +76,22 @@ impl AppState {
             session_states,
             subscribers,
             session_store,
-            ralph_handle: Arc::new(tokio::sync::RwLock::new(None)),
+            ralph_handles: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             deploy,
             global_broadcast,
         }
     }
 
-    /// Set the ralph loop handle
-    pub async fn set_ralph_handle(&self, handle: RalphHandle) {
-        let mut rh = self.ralph_handle.write().await;
-        *rh = Some(Arc::new(handle));
+    /// Set a ralph loop handle for a session
+    pub async fn set_ralph_handle(&self, session_id: &str, handle: RalphHandle) {
+        let mut handles = self.ralph_handles.write().await;
+        handles.insert(session_id.to_string(), Arc::new(handle));
     }
 
-    /// Get ralph loop state: (active, paused)
+    /// Get ralph loop state for the maintainer: (active, paused)
     pub fn ralph_state(&self) -> (bool, bool) {
-        // Use try_read to avoid blocking in sync context
-        match self.ralph_handle.try_read() {
-            Ok(guard) => match guard.as_ref() {
+        match self.ralph_handles.try_read() {
+            Ok(handles) => match handles.get(crate::controller::maintainer::MAINTAINER_SESSION_ID) {
                 Some(handle) => (true, handle.is_paused()),
                 None => (false, false),
             },
@@ -100,20 +99,47 @@ impl AppState {
         }
     }
 
-    /// Pause the ralph loop
+    /// Pause the maintainer ralph loop
     pub fn pause_ralph(&self) {
-        if let Ok(guard) = self.ralph_handle.try_read() {
-            if let Some(handle) = guard.as_ref() {
+        if let Ok(handles) = self.ralph_handles.try_read() {
+            if let Some(handle) = handles.get(crate::controller::maintainer::MAINTAINER_SESSION_ID) {
                 handle.pause();
             }
         }
     }
 
-    /// Resume the ralph loop
+    /// Resume the maintainer ralph loop
     pub fn resume_ralph(&self) {
-        if let Ok(guard) = self.ralph_handle.try_read() {
-            if let Some(handle) = guard.as_ref() {
+        if let Ok(handles) = self.ralph_handles.try_read() {
+            if let Some(handle) = handles.get(crate::controller::maintainer::MAINTAINER_SESSION_ID) {
                 handle.resume();
+            }
+        }
+    }
+
+    /// Toggle a per-session ralph loop on or off
+    pub async fn toggle_ralph(
+        &self,
+        session_id: &str,
+        enable: bool,
+        tmux: &Arc<dyn TmuxClient>,
+        session_states: &SharedSessionStates,
+        data_dir: &str,
+    ) {
+        if enable {
+            let already = { self.ralph_handles.read().await.contains_key(session_id) };
+            if already { return; }
+
+            let inbox_path = std::path::PathBuf::from(data_dir).join("inbox").join(session_id);
+            let _ = tokio::fs::create_dir_all(&inbox_path).await;
+
+            let config = crate::controller::ralph::default_session_ralph_config(session_id, data_dir);
+            let handle = crate::controller::ralph::start_ralph_loop(config, tmux.clone(), session_states.clone());
+            self.set_ralph_handle(session_id, handle).await;
+        } else {
+            let mut handles = self.ralph_handles.write().await;
+            if let Some(handle) = handles.remove(session_id) {
+                handle.abort();
             }
         }
     }

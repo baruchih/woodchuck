@@ -136,6 +136,7 @@ pub async fn list_sessions(tmux: &(impl TmuxClient + ?Sized)) -> Result<Vec<Sess
             last_input: None,    // Will be overlaid from shared state in handler
             last_input_at: None, // Will be overlaid from shared state in handler
             tags: Vec::new(),    // Will be overlaid from shared state in handler
+            ralph_enabled: false, // Will be overlaid from shared state in handler
         }
     }).collect();
 
@@ -182,6 +183,7 @@ pub async fn get_session(tmux: &(impl TmuxClient + ?Sized), session_id: &str) ->
         last_input: None,     // Will be overlaid from shared state in handler
         last_input_at: None,  // Will be overlaid from shared state in handler
         tags: Vec::new(),     // Will be overlaid from shared state in handler
+        ralph_enabled: false, // Will be overlaid from shared state in handler
     })
 }
 
@@ -264,6 +266,7 @@ pub async fn create_session(
         last_input: None,         // No input sent yet
         last_input_at: None,      // No input sent yet
         tags: Vec::new(),         // No tags by default
+        ralph_enabled: false,     // Ralph disabled by default
     })
 }
 

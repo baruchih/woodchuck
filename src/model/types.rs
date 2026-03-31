@@ -54,6 +54,10 @@ pub struct Session {
     /// User-assigned tags for filtering/grouping
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+
+    /// Whether a per-session ralph loop is enabled
+    #[serde(default)]
+    pub ralph_enabled: bool,
 }
 
 // =============================================================================
@@ -168,6 +172,10 @@ pub struct UpdateSessionParams {
     /// New tags for the session (replaces existing tags)
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+
+    /// Enable or disable per-session ralph loop
+    #[serde(default)]
+    pub ralph_enabled: Option<bool>,
 }
 
 /// Custom deserializer for project_id to distinguish between missing field and null value

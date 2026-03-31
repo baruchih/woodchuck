@@ -100,6 +100,31 @@ impl RalphHandle {
     }
 }
 
+/// Default auto-response patterns for ralph loops
+pub fn default_auto_responses() -> Vec<AutoResponse> {
+    vec![
+        AutoResponse { pattern: Regex::new(r"(?i)\(y/n\)").unwrap(), response: "y".to_string() },
+        AutoResponse { pattern: Regex::new(r"(?i)Trust this").unwrap(), response: "y".to_string() },
+        AutoResponse { pattern: Regex::new(r"(?i)Do you want to").unwrap(), response: "y".to_string() },
+        AutoResponse { pattern: Regex::new(r"(?i)Would you like").unwrap(), response: "y".to_string() },
+        AutoResponse { pattern: Regex::new(r"Press Enter").unwrap(), response: String::new() },
+    ]
+}
+
+/// Build a default RalphConfig for a per-session ralph loop (inbox-backed, no auto-deploy)
+pub fn default_session_ralph_config(session_id: &str, data_dir: &str) -> RalphConfig {
+    let inbox_path = std::path::PathBuf::from(data_dir).join("inbox").join(session_id);
+    RalphConfig {
+        session_id: session_id.to_string(),
+        auto_responses: default_auto_responses(),
+        max_auto_responses_per_task: 20,
+        cooldown: Duration::from_secs(3),
+        on_resting: OnResting::CheckInbox { path: inbox_path },
+        inbox_check_delay: Duration::from_secs(10),
+        auto_deploy: None,
+    }
+}
+
 /// Start a ralph loop for a session
 pub fn start_ralph_loop(
     config: RalphConfig,

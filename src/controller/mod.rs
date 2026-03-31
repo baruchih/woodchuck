@@ -19,7 +19,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use regex::Regex;
 use tracing::{info, warn};
 
 use crate::config::Config;
@@ -106,42 +105,38 @@ pub async fn start(config: &Config) -> Result<StopFn, ModelError> {
         push.clone(),
     ).await;
 
-    // Register ralph handle with app state so API can report status/pause/resume
+    // Register maintainer ralph handle with app state
     if let Some(handle) = ralph_handle {
-        app_state.set_ralph_handle(handle).await;
-        // Re-acquire for the stop function
-        let app_state_stop = app_state.clone();
-
-        // Return combined stop function
-        let stop_fn: StopFn = Box::new(move || {
-            Box::pin(async move {
-                info!("Stopping controllers...");
-
-                // Stop the ralph loop
-                {
-                    let rh = app_state_stop.ralph_handle.read().await;
-                    if let Some(handle) = rh.as_ref() {
-                        handle.abort();
-                    }
-                }
-
-                // Stop the poller
-                poller_handle.abort();
-
-                // Stop HTTP server
-                http_stop().await;
-
-                info!("All controllers stopped");
-            })
-        });
-
-        return Ok(stop_fn);
+        app_state.set_ralph_handle(maintainer::MAINTAINER_SESSION_ID, handle).await;
     }
 
-    // Return combined stop function (no ralph)
+    // Restore per-session ralph loops from persisted state
+    {
+        let states = session_states.read().await;
+        for (sid, state) in states.iter() {
+            if state.ralph_enabled && sid != maintainer::MAINTAINER_SESSION_ID {
+                let ralph_config = ralph::default_session_ralph_config(sid, &config.data_dir);
+                let handle = ralph::start_ralph_loop(ralph_config, tmux.clone(), session_states.clone());
+                app_state.set_ralph_handle(sid, handle).await;
+                info!(session = %sid, "Restored ralph loop");
+            }
+        }
+    }
+
+    let app_state_stop = app_state.clone();
+
+    // Return combined stop function
     let stop_fn: StopFn = Box::new(move || {
         Box::pin(async move {
             info!("Stopping controllers...");
+
+            // Stop all ralph loops
+            {
+                let handles = app_state_stop.ralph_handles.read().await;
+                for (_, handle) in handles.iter() {
+                    handle.abort();
+                }
+            }
 
             // Stop the poller
             poller_handle.abort();
@@ -223,6 +218,7 @@ async fn start_maintainer(
                     tags: Vec::new(),
                     last_notified_status: None,
                     folder: Some(repo_dir),
+                    ralph_enabled: false,
                 };
                 let store = session_store.clone();
                 let sid = session_id.to_string();
@@ -270,28 +266,7 @@ async fn start_maintainer(
 
     let ralph_config = ralph::RalphConfig {
         session_id: session_id.to_string(),
-        auto_responses: vec![
-            ralph::AutoResponse {
-                pattern: Regex::new(r"(?i)\(y/n\)").unwrap(),
-                response: "y".to_string(),
-            },
-            ralph::AutoResponse {
-                pattern: Regex::new(r"(?i)Trust this").unwrap(),
-                response: "y".to_string(),
-            },
-            ralph::AutoResponse {
-                pattern: Regex::new(r"(?i)Do you want to").unwrap(),
-                response: "y".to_string(),
-            },
-            ralph::AutoResponse {
-                pattern: Regex::new(r"(?i)Would you like").unwrap(),
-                response: "y".to_string(),
-            },
-            ralph::AutoResponse {
-                pattern: Regex::new(r"Press Enter").unwrap(),
-                response: String::new(), // bare Enter
-            },
-        ],
+        auto_responses: ralph::default_auto_responses(),
         max_auto_responses_per_task: 20,
         cooldown: Duration::from_secs(3),
         on_resting: ralph::OnResting::CheckInbox { path: inbox_path },

@@ -64,7 +64,7 @@ pub enum ClientMessage {
         request_id: Option<String>,
     },
 
-    /// Update session metadata (rename, project, tags)
+    /// Update session metadata (rename, project, tags, ralph)
     UpdateSession {
         session_id: String,
         #[serde(default)]
@@ -73,6 +73,8 @@ pub enum ClientMessage {
         project_id: Option<Option<String>>,
         #[serde(default)]
         tags: Option<Vec<String>>,
+        #[serde(default)]
+        ralph_enabled: Option<bool>,
         #[serde(default)]
         request_id: Option<String>,
     },
@@ -157,6 +159,8 @@ pub enum ServerMessage {
         project_id: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tags: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ralph_enabled: Option<bool>,
     },
 
     /// Acknowledgment for mutations

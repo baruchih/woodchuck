@@ -62,6 +62,9 @@ pub struct SessionState {
 
     /// When the current status was first detected (for notification debounce)
     pub status_stable_since: Option<DateTime<Utc>>,
+
+    /// Whether a per-session ralph loop is enabled
+    pub ralph_enabled: bool,
 }
 
 impl Default for SessionState {
@@ -82,6 +85,7 @@ impl Default for SessionState {
             is_maintainer: false,
             last_notified_status: None,
             status_stable_since: None,
+            ralph_enabled: false,
         }
     }
 }
@@ -117,6 +121,7 @@ impl SessionState {
             tags: persisted.tags,
             folder: persisted.folder,
             last_notified_status,
+            ralph_enabled: persisted.ralph_enabled,
             ..Self::default()
         }
     }
@@ -134,6 +139,7 @@ impl SessionState {
             tags: self.tags.clone(),
             last_notified_status: self.last_notified_status,
             folder: self.folder.clone(),
+            ralph_enabled: self.ralph_enabled,
         }
     }
 

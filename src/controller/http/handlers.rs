@@ -88,6 +88,7 @@ pub async fn list_sessions_handler(
             session.last_input = ss.last_input.clone();
             session.last_input_at = ss.last_input_at;
             session.tags = ss.tags.clone();
+            session.ralph_enabled = ss.ralph_enabled;
             // Only overlay name if we have a user-provided name stored
             if !ss.name.is_empty() {
                 debug!(session_id = %session.id, stored_name = %ss.name, "Overlaying stored name");
@@ -127,6 +128,7 @@ pub async fn get_session_handler(
         session.last_input = ss.last_input.clone();
         session.last_input_at = ss.last_input_at;
         session.tags = ss.tags.clone();
+        session.ralph_enabled = ss.ralph_enabled;
         if !ss.name.is_empty() {
             session.name = ss.name.clone();
         }
@@ -180,6 +182,9 @@ pub async fn delete_session_handler(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
 ) -> ApiResult<SessionKilledData> {
+    // Stop any ralph loop for this session
+    state.toggle_ralph(&session_id, false, &state.tmux, &state.session_states, &state.config.data_dir).await;
+
     delete_session(state.tmux.as_ref(), &session_id)
         .await
         .map_err(err)?;
@@ -206,6 +211,15 @@ pub async fn restart_session_handler(
         .await
         .map_err(err)?;
     let folder = session.folder.clone();
+
+    // Check if ralph was enabled (to restore after restart)
+    let ralph_was_enabled = {
+        let states = state.session_states.read().await;
+        states.get(&session_id).map(|s| s.ralph_enabled).unwrap_or(false)
+    };
+
+    // Stop ralph loop before killing
+    state.toggle_ralph(&session_id, false, &state.tmux, &state.session_states, &state.config.data_dir).await;
 
     // Kill the existing tmux session
     crate::model::delete_session(state.tmux.as_ref(), &session_id)
@@ -267,7 +281,13 @@ pub async fn restart_session_handler(
         last_input: session.last_input,
         last_input_at: session.last_input_at,
         tags: session.tags,
+        ralph_enabled: ralph_was_enabled,
     };
+
+    // Restart ralph loop if it was enabled before
+    if ralph_was_enabled {
+        state.toggle_ralph(&session_id, true, &state.tmux, &state.session_states, &state.config.data_dir).await;
+    }
 
     info!(session = %session_id, "Restarted session with claude --continue");
     Ok(ApiResponse::ok(SessionCreatedData { session: restarted }))
@@ -407,7 +427,7 @@ pub async fn update_session_handler(
     }
 
     // Update shared state and get the full state for persistence
-    let (final_name, final_project_id, final_tags) = {
+    let (final_name, final_project_id, final_tags, final_ralph_enabled) = {
         let mut states = state.session_states.write().await;
         let ss = states.entry(session_id.clone()).or_insert_with(|| {
             crate::model::SessionState::default()
@@ -428,24 +448,36 @@ pub async fn update_session_handler(
             ss.tags = new_tags;
         }
 
+        // Update ralph_enabled if provided
+        if let Some(ralph_enabled) = params.ralph_enabled {
+            ss.ralph_enabled = ralph_enabled;
+        }
+
         let persisted = ss.to_persisted();
         let name = if ss.name.is_empty() { None } else { Some(ss.name.clone()) };
         let project_id = ss.project_id.clone();
         let tags = ss.tags.clone();
+        let ralph_enabled = if params.ralph_enabled.is_some() { params.ralph_enabled } else { None };
 
         // Persist full state (non-fatal if fails)
         if let Err(e) = state.session_store.save(&session_id, &persisted).await {
             warn!(session = %session_id, error = %e, "Failed to persist updated session");
         }
 
-        (name, project_id, tags)
+        (name, project_id, tags, ralph_enabled)
     };
+
+    // Toggle ralph loop if ralph_enabled changed
+    if let Some(ralph_enabled) = final_ralph_enabled {
+        state.toggle_ralph(&session_id, ralph_enabled, &state.tmux, &state.session_states, &state.config.data_dir).await;
+    }
 
     info!(session = %session_id, name = ?final_name, project_id = ?final_project_id, "Updated session");
     Ok(ApiResponse::ok(SessionUpdatedData {
         name: final_name,
         project_id: final_project_id,
         tags: final_tags,
+        ralph_enabled: final_ralph_enabled,
     }))
 }
 
@@ -1968,6 +2000,7 @@ pub async fn recover_session_handler(
         last_input: persisted.last_input.clone(),
         last_input_at: persisted.last_input_at,
         tags: persisted.tags.clone(),
+        ralph_enabled: persisted.ralph_enabled,
     };
 
     info!(session = %session_id, folder = %folder, "Recovered orphaned session");
