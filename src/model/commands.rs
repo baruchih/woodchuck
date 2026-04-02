@@ -185,10 +185,39 @@ fn parse_skill_frontmatter(content: &str) -> Option<(String, String, bool)> {
     }
 }
 
+/// Extract skill name and description from a SKILL.md without frontmatter.
+///
+/// Falls back to using the parent directory name as the command name
+/// and the first markdown heading or non-empty line as the description.
+fn parse_skill_without_frontmatter(content: &str, dir_name: &str) -> Option<(String, String)> {
+    let name = format!("/{}", dir_name);
+    let mut description = String::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        // Use first heading text as description
+        if let Some(heading) = trimmed.strip_prefix('#') {
+            description = heading.trim_start_matches('#').trim().to_string();
+            break;
+        }
+        // Or first non-empty line
+        description = trimmed.to_string();
+        break;
+    }
+
+    if description.is_empty() {
+        description = dir_name.to_string();
+    }
+
+    Some((name, description))
+}
+
 /// Discover skills from a project folder's .claude/skills directory
 ///
 /// Scans for SKILL.md files and parses their frontmatter to extract
-/// user-invocable skills as slash commands.
+/// user-invocable skills as slash commands. Skills without frontmatter
+/// are also included using the directory name as the command name.
 pub fn discover_skills(folder: &str) -> Vec<SlashCommand> {
     let skills_dir = Path::new(folder).join(".claude").join("skills");
 
@@ -223,16 +252,29 @@ pub fn discover_skills(folder: &str) -> Vec<SlashCommand> {
             Err(_) => continue,
         };
 
+        let dir_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("skill")
+            .to_string();
+
         if let Some((name, description, user_invocable)) = parse_skill_frontmatter(&content) {
-            // Only include user-invocable skills
+            // Skills with frontmatter: only include if user-invocable
             if user_invocable {
                 skills.push(SlashCommand {
                     name: format!("/{}", name),
                     description,
                     usage: format!("/{}", name),
-                    has_args: false, // Skills don't have explicit arg definitions in frontmatter
+                    has_args: false,
                 });
             }
+        } else if let Some((name, description)) = parse_skill_without_frontmatter(&content, &dir_name) {
+            // Skills without frontmatter: include by default (directory name = command name)
+            skills.push(SlashCommand {
+                name: name.clone(),
+                description,
+                usage: name,
+                has_args: true, // Assume skills accept args
+            });
         }
     }
 
