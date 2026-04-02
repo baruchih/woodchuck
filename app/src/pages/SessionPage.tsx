@@ -46,7 +46,7 @@ export function SessionPage() {
   const decodedId = id ? decodeURIComponent(id) : '';
 
   // Commands for slash autocomplete (session-aware)
-  const { commands } = useCommands(decodedId);
+  const { commands, refresh: refreshCommands } = useCommands(decodedId);
   const { showMenu: showSlashMenu, slashFilter, filteredCommands } = useSlashCommandState(inputBuffer, commands);
 
   // Ref to track if we're in slash mode (typing a slash command)
@@ -589,7 +589,7 @@ export function SessionPage() {
           content={content}
           onClose={handleCloseInfo}
           onDelete={handleDeleteFromInfo}
-          onRestart={restartSession}
+          onRestart={async (id) => { await restartSession(id); setTimeout(refreshCommands, 3000); }}
           onRename={handleRenameSession}
           onMoveToProject={handleMoveToProject}
         />

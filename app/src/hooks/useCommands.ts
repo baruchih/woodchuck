@@ -31,6 +31,9 @@ export function useCommands(sessionId?: string): UseCommandsResult {
   // Fetch commands on mount and when sessionId changes
   useEffect(() => {
     refresh();
+    // Re-fetch periodically to pick up new skills after session restart
+    const interval = setInterval(refresh, 30_000);
+    return () => clearInterval(interval);
   }, [refresh]);
 
   return { commands, loading, error, refresh };
