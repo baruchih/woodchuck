@@ -12,6 +12,7 @@ import { XtermTerminal } from '../components/XtermTerminal';
 import { MobileInputBar } from '../components/MobileInputBar';
 import { UploadStatus, useUploadStatus } from '../components/UploadStatus';
 import { FileBrowser } from '../components/FileBrowser';
+import { ShellPanel } from '../components/ShellPanel';
 import { api } from '../api/client';
 import { useSessions } from '../hooks/useSessions';
 import { useProjects } from '../hooks/useProjects';
@@ -35,6 +36,7 @@ export function SessionPage() {
   const [showKillConfirm, setShowKillConfirm] = useState(false);
   const [showInfoSheet, setShowInfoSheet] = useState(false);
   const [showFileBrowser, setShowFileBrowser] = useState(false);
+  const [showShell, setShowShell] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error] = useState<string | null>(null);
@@ -464,6 +466,15 @@ export function SessionPage() {
         <UploadStatus state={uploadStatus} />
 
         {/* Input bar — text input + action toolbar for reliable message sending */}
+        {/* Shell panel */}
+        {showShell && (
+          <ShellPanel
+            sessionId={decodedId}
+            onClose={() => setShowShell(false)}
+          />
+        )}
+
+        {/* Input bar — text input + action toolbar for reliable message sending */}
         <MobileInputBar
           onSend={handleMobileSend}
           onSendKey={handleSendKey}
@@ -471,6 +482,7 @@ export function SessionPage() {
           onUploadFiles={handleUploadFiles}
           onBrowseFiles={() => setShowFileBrowser(true)}
           onKillSession={() => setShowKillConfirm(true)}
+          onShell={() => setShowShell(prev => !prev)}
           onRefresh={handleRefresh}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}

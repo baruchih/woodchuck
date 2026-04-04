@@ -92,6 +92,16 @@ export const api = {
       method: 'POST',
     }),
 
+  openShell: (id: string): Promise<{ shell_id: string; created: boolean }> =>
+    request(`/sessions/${encodeURIComponent(id)}/shell`, {
+      method: 'POST',
+    }),
+
+  closeShell: (id: string): Promise<{ shell_id: string; created: boolean }> =>
+    request(`/sessions/${encodeURIComponent(id)}/shell`, {
+      method: 'DELETE',
+    }),
+
   updateSession: (id: string, params: { name?: string; project_id?: string | null; tags?: string[]; ralph_enabled?: boolean }): Promise<{ name?: string; project_id?: string; tags?: string[]; ralph_enabled?: boolean }> =>
     request(`/sessions/${encodeURIComponent(id)}`, {
       method: 'PATCH',

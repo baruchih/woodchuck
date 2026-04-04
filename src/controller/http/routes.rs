@@ -25,6 +25,7 @@ use super::handlers::{
     maintainer_inbox_handler, maintainer_pause_handler, maintainer_resume_handler,
     maintainer_status_handler, poll_handler, push_subscribe_handler,
     push_unsubscribe_handler, recover_session_handler, rename_project_handler,
+    open_shell_handler, close_shell_handler,
     resize_handler, restart_session_handler, send_input_handler, session_files_handler,
     update_deploy_settings_handler, update_session_handler,
     upload_files_handler, upload_image_handler, upload_project_handler, vapid_key_handler,
@@ -75,6 +76,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/sessions/:id/input", post(send_input_handler))
         .route("/sessions/:id/resize", post(resize_handler))
         .route("/sessions/:id/restart", post(restart_session_handler))
+        .route("/sessions/:id/shell", post(open_shell_handler))
+        .route("/sessions/:id/shell", delete(close_shell_handler))
         .route("/sessions/:id/hook", post(hook_handler))
         .route("/sessions/:id/recover", post(recover_session_handler))
         .route("/sessions/:id/orphaned", delete(discard_orphaned_handler))

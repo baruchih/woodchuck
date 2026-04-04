@@ -9,6 +9,7 @@ interface MobileInputBarProps {
   onUploadFiles: () => void;
   onBrowseFiles: () => void;
   onKillSession: () => void;
+  onShell: () => void;
   onRefresh: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -23,6 +24,7 @@ export function MobileInputBar({
   onUploadFiles,
   onBrowseFiles,
   onKillSession,
+  onShell,
   onRefresh,
   onZoomIn,
   onZoomOut,
@@ -108,6 +110,7 @@ export function MobileInputBar({
         <ActionButton label="A+" onClick={onZoomIn} />
         <ActionButton label="A-" onClick={onZoomOut} />
         <ActionButton label="Dir" onClick={onBrowseFiles} />
+        <ActionButton label="Sh" onClick={onShell} />
         <ActionButton label="Ref" onClick={onRefresh} />
         <ActionButton label="Kill" onClick={onKillSession} variant="danger" />
       </div>

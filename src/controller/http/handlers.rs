@@ -18,7 +18,7 @@ use super::response::{
     HookData, InboxItemData, InputSentData, MaintainerStatusData, OrphanedSessionData,
     OrphanedSessionsData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, RecoveredSessionData, ResizeData,
-    SessionCreatedData, SessionData, SessionFilesData, SessionKilledData, SessionUpdatedData,
+    SessionCreatedData, SessionData, SessionFilesData, SessionKilledData, SessionUpdatedData, ShellData,
     SessionsData, TemplateData, TemplateDeletedData, TemplatesListData, UploadProjectData,
     UploadedFilesData, UploadedImageData, VapidKeyData,
 };
@@ -291,6 +291,52 @@ pub async fn restart_session_handler(
 
     info!(session = %session_id, "Restarted session with claude --continue");
     Ok(ApiResponse::ok(SessionCreatedData { session: restarted }))
+}
+
+/// POST /sessions/:id/shell - Open a shell terminal in the session's folder
+#[instrument(skip(state))]
+pub async fn open_shell_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> ApiResult<ShellData> {
+    // Get session folder
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+
+    let shell_id = format!("{}_shell", session_id);
+
+    // Check if shell already exists
+    if state.tmux.has_session(&shell_id).await.unwrap_or(false) {
+        return Ok(ApiResponse::ok(ShellData { shell_id, created: false }));
+    }
+
+    // Get the user's shell
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+
+    // Create a tmux session running the user's shell in the project folder
+    state.tmux.new_session(&shell_id, &session.folder, &shell)
+        .await
+        .map_err(err)?;
+
+    info!(session = %session_id, shell = %shell_id, "Opened shell terminal");
+    Ok(ApiResponse::ok(ShellData { shell_id, created: true }))
+}
+
+/// DELETE /sessions/:id/shell - Close the shell terminal
+#[instrument(skip(state))]
+pub async fn close_shell_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> ApiResult<ShellData> {
+    let shell_id = format!("{}_shell", session_id);
+
+    if state.tmux.has_session(&shell_id).await.unwrap_or(false) {
+        let _ = state.tmux.kill_session(&shell_id).await;
+        info!(session = %session_id, shell = %shell_id, "Closed shell terminal");
+    }
+
+    Ok(ApiResponse::ok(ShellData { shell_id, created: false }))
 }
 
 /// Maximum length for stored last_input (truncated if longer)

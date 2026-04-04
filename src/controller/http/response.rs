@@ -163,6 +163,13 @@ pub struct SessionKilledData {
     pub killed: bool,
 }
 
+/// Shell terminal response
+#[derive(Debug, Serialize)]
+pub struct ShellData {
+    pub shell_id: String,
+    pub created: bool,
+}
+
 /// Session updated response (renamed, moved to project, or tags updated)
 #[derive(Debug, Serialize)]
 pub struct SessionUpdatedData {
