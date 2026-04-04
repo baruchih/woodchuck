@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { XtermTerminal } from './XtermTerminal';
 import { useSessionOutput } from '../hooks/useSessionOutput';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
@@ -83,11 +83,13 @@ export function ShellPanel({ sessionId, onClose }: ShellPanelProps) {
       <div className="flex-1 min-h-0 overflow-hidden">
         <ShellTerminal shellId={shellId} />
       </div>
+      {/* Shell input bar */}
+      <ShellInput shellId={shellId} />
     </div>
   );
 }
 
-/** Inner component that subscribes to the shell tmux session */
+/** Terminal display for the shell */
 function ShellTerminal({ shellId }: { shellId: string }) {
   const { sendRawInput, resize } = useWS();
   const { content } = useSessionOutput({ sessionId: shellId });
@@ -110,6 +112,60 @@ function ShellTerminal({ shellId }: { shellId: string }) {
       onResize={handleResize}
       onZoomIn={() => {}}
       onZoomOut={() => {}}
+      disableKeyboard
     />
+  );
+}
+
+/** Text input bar for the shell */
+function ShellInput({ shellId }: { shellId: string }) {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleSend = useCallback(async () => {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    try {
+      await api.sendInput(shellId, trimmed);
+      setText('');
+      inputRef.current?.focus();
+    } catch (err) {
+      console.error('Failed to send shell input:', err);
+    } finally {
+      setSending(false);
+    }
+  }, [text, sending, shellId]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }, [handleSend]);
+
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-surface border-t border-border shrink-0">
+      <span className="text-primary text-xs font-mono shrink-0">$</span>
+      <input
+        ref={inputRef}
+        type="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Shell command..."
+        className="flex-1 bg-background border border-border rounded-sm px-2 py-1 text-xs text-text font-mono placeholder:text-text-muted focus:outline-none focus:border-primary"
+        autoComplete="off"
+        autoFocus
+      />
+      <button
+        onClick={handleSend}
+        disabled={!text.trim() || sending}
+        className="text-xs font-medium text-primary disabled:opacity-30 px-2 py-1"
+      >
+        Run
+      </button>
+    </div>
   );
 }
