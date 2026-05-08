@@ -440,108 +440,110 @@ export function SessionPage() {
 
   return (
     <Layout title={title} showBack rightAction={infoButton}>
-      <div className="flex flex-col flex-1 min-h-0 overflow-hidden relative">
-        {/* Error banner (if any) */}
-        {error && (
-          <div className="bg-status-error/20 border-b border-status-error px-3 py-2">
-            <p className="text-status-error text-xs">{error}</p>
+      <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+        {/* Claude session: terminal + input bar (typing preview overlays this section) */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden relative">
+          {/* Error banner (if any) */}
+          {error && (
+            <div className="bg-status-error/20 border-b border-status-error px-3 py-2">
+              <p className="text-status-error text-xs">{error}</p>
+            </div>
+          )}
+          {/* Terminal output area — fills available space in this section */}
+          <div className={`flex-1 min-h-0 overflow-hidden ${attentionClass}`}>
+            <XtermTerminal
+              sessionId={decodedId}
+              content={content}
+              fontSize={fontSize}
+              onInput={handleTerminalInput}
+              onResize={handleTerminalResize}
+              onZoomIn={zoomIn}
+              onZoomOut={zoomOut}
+              disableKeyboard={isMobile}
+              refreshKey={refreshKey}
+            />
           </div>
-        )}
-        {/* Terminal output area — fills all available space */}
-        <div className={`flex-1 min-h-0 overflow-hidden ${attentionClass}`}>
-          <XtermTerminal
-            sessionId={decodedId}
-            content={content}
-            fontSize={fontSize}
-            onInput={handleTerminalInput}
-            onResize={handleTerminalResize}
+
+          {/* Upload status indicator */}
+          <UploadStatus state={uploadStatus} />
+
+          {/* Input bar — text input + action toolbar for reliable message sending */}
+          <MobileInputBar
+            onSend={handleMobileSend}
+            onSendKey={handleSendKey}
+            onUploadImage={handleUploadImage}
+            onUploadFiles={handleUploadFiles}
+            onBrowseFiles={() => setShowFileBrowser(true)}
+            onKillSession={() => setShowKillConfirm(true)}
+            onShell={() => setShowShell(prev => !prev)}
+            onRefresh={handleRefresh}
             onZoomIn={zoomIn}
             onZoomOut={zoomOut}
-            disableKeyboard={isMobile}
-            refreshKey={refreshKey}
+            sending={sending}
+            commands={commands}
           />
+
+          {/* Typing preview bar with slash command menu — overlays the claude input bar */}
+          {(hasTypedText || showSlashMenu) && (
+            <div className="absolute bottom-0 left-0 right-0 bg-surface/95 border-t border-border px-3 py-2 z-10">
+              {/* Slash command dropdown - positioned above the bar */}
+              <SlashCommandMenu
+                open={showSlashMenu}
+                commands={filteredCommands}
+                selectedIndex={slashMenuSelectedIndex}
+                onSelect={handleSlashCommandSelect}
+                onClose={handleSlashMenuClose}
+              />
+
+              <div className="flex items-start gap-2">
+                <span className="text-primary mt-0.5" style={{ fontSize: `${fontSize}px` }}>$</span>
+                <span className="text-text font-mono flex-1 break-words whitespace-pre-wrap" style={{ fontSize: `${fontSize}px` }}>
+                  {inputBuffer}
+                </span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={async () => {
+                      if (!decodedId || !inputBuffer.trim() || sending) return;
+                      setSending(true);
+                      try {
+                        await sendInput(decodedId, inputBuffer.trim());
+                        setInputBuffer('');
+                        slashModeRef.current = false;
+                        triggerFastPoll();
+                        notifySentText(inputBuffer.trim());
+                      } catch (err) {
+                        console.error('Failed to send input:', err);
+                      } finally {
+                        setSending(false);
+                      }
+                    }}
+                    disabled={sending}
+                    className="text-xs font-medium uppercase tracking-wider text-primary disabled:opacity-30 px-2 py-1 btn-active"
+                  >
+                    Send
+                  </button>
+                  <button
+                    onClick={() => {
+                      setInputBuffer('');
+                      slashModeRef.current = false;
+                    }}
+                    className="text-xs text-text-muted px-1 btn-active"
+                    aria-label="Clear input"
+                  >
+                    &times;
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Upload status indicator */}
-        <UploadStatus state={uploadStatus} />
-
-        {/* Input bar — text input + action toolbar for reliable message sending */}
-        {/* Shell panel */}
+        {/* Shell panel — sits below the claude input bar so the claude session stays fully visible */}
         {showShell && (
           <ShellPanel
             sessionId={decodedId}
             onClose={() => setShowShell(false)}
           />
-        )}
-
-        {/* Input bar — text input + action toolbar for reliable message sending */}
-        <MobileInputBar
-          onSend={handleMobileSend}
-          onSendKey={handleSendKey}
-          onUploadImage={handleUploadImage}
-          onUploadFiles={handleUploadFiles}
-          onBrowseFiles={() => setShowFileBrowser(true)}
-          onKillSession={() => setShowKillConfirm(true)}
-          onShell={() => setShowShell(prev => !prev)}
-          onRefresh={handleRefresh}
-          onZoomIn={zoomIn}
-          onZoomOut={zoomOut}
-          sending={sending}
-          commands={commands}
-        />
-
-        {/* Typing preview bar with slash command menu */}
-        {(hasTypedText || showSlashMenu) && (
-          <div className="absolute bottom-0 left-0 right-0 bg-surface/95 border-t border-border px-3 py-2 z-10">
-            {/* Slash command dropdown - positioned above the bar */}
-            <SlashCommandMenu
-              open={showSlashMenu}
-              commands={filteredCommands}
-              selectedIndex={slashMenuSelectedIndex}
-              onSelect={handleSlashCommandSelect}
-              onClose={handleSlashMenuClose}
-            />
-
-            <div className="flex items-start gap-2">
-              <span className="text-primary mt-0.5" style={{ fontSize: `${fontSize}px` }}>$</span>
-              <span className="text-text font-mono flex-1 break-words whitespace-pre-wrap" style={{ fontSize: `${fontSize}px` }}>
-                {inputBuffer}
-              </span>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  onClick={async () => {
-                    if (!decodedId || !inputBuffer.trim() || sending) return;
-                    setSending(true);
-                    try {
-                      await sendInput(decodedId, inputBuffer.trim());
-                      setInputBuffer('');
-                      slashModeRef.current = false;
-                      triggerFastPoll();
-                      notifySentText(inputBuffer.trim());
-                    } catch (err) {
-                      console.error('Failed to send input:', err);
-                    } finally {
-                      setSending(false);
-                    }
-                  }}
-                  disabled={sending}
-                  className="text-xs font-medium uppercase tracking-wider text-primary disabled:opacity-30 px-2 py-1 btn-active"
-                >
-                  Send
-                </button>
-                <button
-                  onClick={() => {
-                    setInputBuffer('');
-                    slashModeRef.current = false;
-                  }}
-                  className="text-xs text-text-muted px-1 btn-active"
-                  aria-label="Clear input"
-                >
-                  &times;
-                </button>
-              </div>
-            </div>
-          </div>
         )}
       </div>
 

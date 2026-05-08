@@ -324,6 +324,11 @@ async fn initialize_session_states(
         };
         // Always update folder from live tmux data (most reliable source)
         state.folder = Some(session.folder.clone());
+        // Re-mark ephemeral shell sessions so the poller suppresses notifications
+        // and the list handler hides them from the main session list.
+        if session.id.ends_with("_shell") {
+            state.is_shell = true;
+        }
         states.insert(session.id.clone(), state);
     }
 

@@ -57,6 +57,10 @@ pub struct SessionState {
     /// Whether this is the maintainer session (hidden from main list)
     pub is_maintainer: bool,
 
+    /// Whether this is an ephemeral shell session attached to another session
+    /// (hidden from main list, notifications suppressed)
+    pub is_shell: bool,
+
     /// Last status for which a push notification was sent (deduplication)
     pub last_notified_status: Option<SessionStatus>,
 
@@ -83,6 +87,7 @@ impl Default for SessionState {
             tags: Vec::new(),
             folder: None,
             is_maintainer: false,
+            is_shell: false,
             last_notified_status: None,
             status_stable_since: None,
             ralph_enabled: false,

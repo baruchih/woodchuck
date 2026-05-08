@@ -99,8 +99,10 @@ pub async fn list_sessions_handler(
         }
     }
 
-    // Filter out maintainer session from the public list
-    sessions.retain(|s| s.id != super::super::maintainer::MAINTAINER_SESSION_ID);
+    // Filter out maintainer session and ephemeral shell sessions from the public list
+    sessions.retain(|s| {
+        s.id != super::super::maintainer::MAINTAINER_SESSION_ID && !s.id.ends_with("_shell")
+    });
 
     info!(count = sessions.len(), "Listed sessions");
     Ok(ApiResponse::ok(SessionsData { sessions }))
@@ -319,6 +321,17 @@ pub async fn open_shell_handler(
         .await
         .map_err(err)?;
 
+    // Register in session_states so the poller streams output updates.
+    // Marked is_shell so the poller suppresses notifications and the list
+    // handler hides it from the main session list.
+    {
+        let mut states = state.session_states.write().await;
+        let mut ss = crate::model::SessionState::with_name(format!("Shell ({})", session_id));
+        ss.folder = Some(session.folder.clone());
+        ss.is_shell = true;
+        states.insert(shell_id.clone(), ss);
+    }
+
     info!(session = %session_id, shell = %shell_id, "Opened shell terminal");
     Ok(ApiResponse::ok(ShellData { shell_id, created: true }))
 }
@@ -334,6 +347,12 @@ pub async fn close_shell_handler(
     if state.tmux.has_session(&shell_id).await.unwrap_or(false) {
         let _ = state.tmux.kill_session(&shell_id).await;
         info!(session = %session_id, shell = %shell_id, "Closed shell terminal");
+    }
+
+    // Remove from session_states so the poller stops polling it
+    {
+        let mut states = state.session_states.write().await;
+        states.remove(&shell_id);
     }
 
     Ok(ApiResponse::ok(ShellData { shell_id, created: false }))

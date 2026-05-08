@@ -303,13 +303,16 @@ async fn poll_session(
     // Debounce Resting: require status to be stable for 5+ seconds to avoid
     // false "finished" notifications during brief prompt flashes when user
     // sends input (quick Resting→Working transition).
-    let current_status = {
+    let (current_status, is_shell) = {
         let states = session_states.read().await;
-        states.get(session_id).map(|s| s.status)
+        match states.get(session_id) {
+            Some(s) => (Some(s.status), s.is_shell),
+            None => (None, false),
+        }
     };
 
     if let Some(current_status) = current_status {
-        let should_notify = matches!(current_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
+        let should_notify = !is_shell && matches!(current_status, SessionStatus::NeedsInput | SessionStatus::Error | SessionStatus::Resting) && {
             let mut states = session_states.write().await;
             if let Some(state) = states.get_mut(session_id) {
                 if state.last_notified_status == Some(current_status) {
