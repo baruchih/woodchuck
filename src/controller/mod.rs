@@ -186,9 +186,9 @@ async fn start_maintainer(
 
         // Use --continue when recovering to restore Claude's conversation context
         let cmd = if was_previously_tracked {
-            "claude --continue --dangerously-skip-permissions"
+            "claude --continue --permission-mode auto"
         } else {
-            "claude --dangerously-skip-permissions"
+            "claude --permission-mode auto"
         };
 
         match tmux.new_session(session_id, &repo_dir, cmd).await {
