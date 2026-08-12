@@ -261,9 +261,9 @@ export function SessionPage() {
     if (!decodedId || sending) return;
     setSending(true);
     try {
-      await sendInput(decodedId, text);
+      const sent = await sendInput(decodedId, text);
       triggerFastPoll();
-      notifySentText(text);
+      notifySentText(sent);
     } catch (err) {
       console.error('Failed to send input:', err);
     } finally {
@@ -506,11 +506,11 @@ export function SessionPage() {
                       if (!decodedId || !inputBuffer.trim() || sending) return;
                       setSending(true);
                       try {
-                        await sendInput(decodedId, inputBuffer.trim());
+                        const sent = await sendInput(decodedId, inputBuffer.trim());
                         setInputBuffer('');
                         slashModeRef.current = false;
                         triggerFastPoll();
-                        notifySentText(inputBuffer.trim());
+                        notifySentText(sent);
                       } catch (err) {
                         console.error('Failed to send input:', err);
                       } finally {

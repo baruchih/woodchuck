@@ -62,10 +62,10 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
     if (!trimmed || sending) return;
     setSending(true);
     try {
-      await sendInput(sessionId, trimmed);
+      const sent = await sendInput(sessionId, trimmed);
       setInputText('');
       triggerFastPoll();
-      notifySentText(trimmed);
+      notifySentText(sent);
     } catch (err) {
       console.error('Failed to send input:', err);
     } finally {
