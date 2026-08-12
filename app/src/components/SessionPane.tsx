@@ -218,6 +218,10 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         <PaneAction label="Tab" onClick={() => handleSendKey('Tab')} />
         <PaneAction label="Dir" onClick={() => setShowFileBrowser(true)} />
         <PaneAction label="Ref" onClick={handleRefresh} />
+        <PaneAction label="↑" onClick={() => handleSendKey('Up')} />
+        <PaneAction label="↓" onClick={() => handleSendKey('Down')} />
+        <PaneAction label="←" onClick={() => handleSendKey('Left')} />
+        <PaneAction label="→" onClick={() => handleSendKey('Right')} />
       </div>
 
       {/* Compact input bar */}

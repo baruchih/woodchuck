@@ -112,6 +112,10 @@ export function MobileInputBar({
         <ActionButton label="Dir" onClick={onBrowseFiles} />
         <ActionButton label="Sh" onClick={onShell} />
         <ActionButton label="Ref" onClick={onRefresh} />
+        <ActionButton label="↑" onClick={() => onSendKey('Up')} />
+        <ActionButton label="↓" onClick={() => onSendKey('Down')} />
+        <ActionButton label="←" onClick={() => onSendKey('Left')} />
+        <ActionButton label="→" onClick={() => onSendKey('Right')} />
         <ActionButton label="Kill" onClick={onKillSession} variant="danger" />
       </div>
 
