@@ -264,7 +264,7 @@ export const api = {
     return uploadWithProgress(`${BASE_URL}/folders/upload`, formData, onProgress);
   },
 
-  uploadFiles: (sessionId: string, files: FileList | File[], onProgress?: ProgressCallback): Promise<{ paths: string[] }> => {
+  uploadFiles: (sessionId: string, files: FileList, onProgress?: ProgressCallback): Promise<{ paths: string[] }> => {
     const formData = new FormData();
     for (const file of Array.from(files)) {
       formData.append('files', file, file.name);

@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { SlashCommandMenu, useSlashCommandState } from './SlashCommandMenu';
+import { INPUT_MAX_BYTES, inputBytes } from '../utils/inputLimit';
 import type { Command } from '../types';
 
 interface MobileInputBarProps {
@@ -37,14 +38,17 @@ export function MobileInputBar({
 
   const { showMenu, filteredCommands } = useSlashCommandState(text, commands);
 
+  const inputByteCount = useMemo(() => inputBytes(text.trim()), [text]);
+  const inputTooLong = inputByteCount > INPUT_MAX_BYTES;
+
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || sending || inputTooLong) return;
     onSend(trimmed);
     setText('');
     setSlashSelectedIndex(0);
     inputRef.current?.focus();
-  }, [text, sending, onSend]);
+  }, [text, sending, inputTooLong, onSend]);
 
   const handleSlashSelect = useCallback((command: Command) => {
     const newText = command.name.startsWith('/') ? `${command.name} ` : `/${command.name} `;
@@ -119,6 +123,13 @@ export function MobileInputBar({
         <ActionButton label="Kill" onClick={onKillSession} variant="danger" />
       </div>
 
+      {/* Input too long warning */}
+      {inputTooLong && (
+        <div className="px-3 py-1 bg-status-error/10 border-b border-status-error/40 text-xs text-status-error">
+          Message too long ({inputByteCount.toLocaleString()} / {INPUT_MAX_BYTES.toLocaleString()} bytes) — upload it as a file instead
+        </div>
+      )}
+
       {/* Text input row */}
       <div className="relative px-2 py-1.5 flex items-center gap-1.5">
         {/* Slash command autocomplete menu */}
@@ -175,7 +186,7 @@ export function MobileInputBar({
         <button
           type="button"
           onClick={handleSend}
-          disabled={!text.trim() || sending}
+          disabled={!text.trim() || sending || inputTooLong}
           className="p-2 rounded-sm text-primary disabled:opacity-30 btn-active shrink-0"
           aria-label="Send"
         >

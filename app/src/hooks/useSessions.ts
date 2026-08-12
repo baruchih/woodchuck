@@ -2,9 +2,6 @@ import { useState, useCallback } from 'react';
 import { api, type ProgressCallback } from '../api/client';
 import type { Session, CreateSessionParams, SessionWithOutput } from '../types';
 
-/** Text larger than this (in bytes) is uploaded as a file instead of sent directly */
-const LONG_TEXT_THRESHOLD_BYTES = 5000;
-
 interface UseSessionsReturn {
   sessions: Session[];
   loading: boolean;
@@ -17,7 +14,7 @@ interface UseSessionsReturn {
   renameSession: (id: string, name: string) => Promise<void>;
   moveToProject: (id: string, projectId: string | null) => Promise<void>;
   updateTags: (id: string, tags: string[]) => Promise<void>;
-  sendInput: (id: string, text: string) => Promise<string>;
+  sendInput: (id: string, text: string) => Promise<void>;
   uploadImage: (id: string, file: File, onProgress?: ProgressCallback) => Promise<string>;
   uploadFiles: (id: string, files: FileList, onProgress?: ProgressCallback) => Promise<string[]>;
   clearError: () => void;
@@ -82,20 +79,8 @@ export function useSessions(): UseSessionsReturn {
     await refresh();
   }, [refresh]);
 
-  const sendInput = useCallback(async (id: string, text: string): Promise<string> => {
-    // The server rejects inputs over 10k bytes, and pasting huge text into a
-    // terminal prompt is unreliable anyway — save long text to the session
-    // uploads folder and send the file path instead.
-    if (new TextEncoder().encode(text).length > LONG_TEXT_THRESHOLD_BYTES) {
-      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      const file = new File([text], `pasted-${ts}.txt`, { type: 'text/plain' });
-      const result = await api.uploadFiles(id, [file]);
-      const msg = `My message was too long to send directly, so it was saved to a file: ${result.paths[0]} — read that file and treat its contents as my message.`;
-      await api.sendInput(id, msg);
-      return msg;
-    }
+  const sendInput = useCallback(async (id: string, text: string): Promise<void> => {
     await api.sendInput(id, text);
-    return text;
   }, []);
 
   const uploadImage = useCallback(async (id: string, file: File, onProgress?: ProgressCallback): Promise<string> => {

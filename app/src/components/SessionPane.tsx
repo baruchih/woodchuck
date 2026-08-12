@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { XtermTerminal } from './XtermTerminal';
 import { SessionInfoSheet } from './SessionInfoSheet';
 import { SlashCommandMenu, useSlashCommandState } from './SlashCommandMenu';
@@ -9,6 +9,7 @@ import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
 import { useCommands } from '../hooks/useCommands';
 import { useSessions } from '../hooks/useSessions';
 import { useWS } from '../context/WebSocketContext';
+import { INPUT_MAX_BYTES, inputBytes } from '../utils/inputLimit';
 import type { Session, Command } from '../types';
 
 interface SessionPaneProps {
@@ -57,21 +58,24 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
     resize(sessionId, cols, rows);
   }, [sessionId, resize]);
 
+  const inputByteCount = useMemo(() => inputBytes(inputText.trim()), [inputText]);
+  const inputTooLong = inputByteCount > INPUT_MAX_BYTES;
+
   const handleSend = useCallback(async () => {
     const trimmed = inputText.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || sending || inputTooLong) return;
     setSending(true);
     try {
-      const sent = await sendInput(sessionId, trimmed);
+      await sendInput(sessionId, trimmed);
       setInputText('');
       triggerFastPoll();
-      notifySentText(sent);
+      notifySentText(trimmed);
     } catch (err) {
       console.error('Failed to send input:', err);
     } finally {
       setSending(false);
     }
-  }, [inputText, sending, sessionId, sendInput, triggerFastPoll, notifySentText]);
+  }, [inputText, sending, inputTooLong, sessionId, sendInput, triggerFastPoll, notifySentText]);
 
   const handleSlashSelect = useCallback((command: Command) => {
     const newText = command.name.startsWith('/') ? `${command.name} ` : `/${command.name} `;
@@ -224,6 +228,13 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         <PaneAction label="→" onClick={() => handleSendKey('Right')} />
       </div>
 
+      {/* Input too long warning */}
+      {inputTooLong && (
+        <div className="px-2 py-0.5 bg-status-error/10 border-t border-status-error/40 text-[10px] text-status-error shrink-0">
+          Message too long ({inputByteCount.toLocaleString()} / {INPUT_MAX_BYTES.toLocaleString()} bytes) — upload it as a file instead
+        </div>
+      )}
+
       {/* Compact input bar */}
       <div className="relative flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
         <SlashCommandMenu
@@ -261,7 +272,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         />
         <button
           onClick={handleSend}
-          disabled={!inputText.trim() || sending}
+          disabled={!inputText.trim() || sending || inputTooLong}
           className="text-[10px] font-medium text-primary disabled:opacity-30 px-1.5 py-0.5 mt-0.5"
         >
           Send
