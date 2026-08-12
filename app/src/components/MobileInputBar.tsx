@@ -110,7 +110,7 @@ export function MobileInputBar({
         <ActionButton label="Enter" onClick={() => onSendKey('Enter')} />
         <ActionButton label="Esc" onClick={() => onSendKey('Escape')} />
         <ActionButton label="C-b" onClick={() => onSendKey('C-b')} />
-        <ActionButton label="Tab" onClick={() => onSendKey('Tab')} />
+        <ActionButton label="S-Tab" onClick={() => onSendKey('BTab')} />
         <ActionButton label="A+" onClick={onZoomIn} />
         <ActionButton label="A-" onClick={onZoomOut} />
         <ActionButton label="Dir" onClick={onBrowseFiles} />

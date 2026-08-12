@@ -219,7 +219,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         <PaneAction label="Enter" onClick={() => handleSendKey('Enter')} />
         <PaneAction label="Esc" onClick={() => handleSendKey('Escape')} />
         <PaneAction label="C-b" onClick={() => handleSendKey('C-b')} />
-        <PaneAction label="Tab" onClick={() => handleSendKey('Tab')} />
+        <PaneAction label="S-Tab" onClick={() => handleSendKey('BTab')} />
         <PaneAction label="Dir" onClick={() => setShowFileBrowser(true)} />
         <PaneAction label="Ref" onClick={handleRefresh} />
         <PaneAction label="↑" onClick={() => handleSendKey('Up')} />
