@@ -249,30 +249,13 @@ async fn start_maintainer(
         info!("Attached to existing maintainer session");
     }
 
-    // Build ralph config for the maintainer
-    let inbox_path = maintainer::inbox_dir(&config.data_dir);
-
-    // Auto-deploy: monitor repo for new commits, build + deploy
-    let repo_dir = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| config.projects_dir.clone());
-    let auto_deploy = ralph::AutoDeployConfig {
-        repo_dir,
-        deploy: deploy_state,
+    // Build ralph config for the maintainer (inbox + auto-deploy)
+    let ralph_config = ralph::maintainer_ralph_config(
+        &config.data_dir,
+        &config.projects_dir,
+        deploy_state,
         push,
-        last_commit_file: std::path::PathBuf::from(&config.data_dir).join("last-deploy-commit"),
-        data_dir: std::path::PathBuf::from(&config.data_dir),
-    };
-
-    let ralph_config = ralph::RalphConfig {
-        session_id: session_id.to_string(),
-        auto_responses: ralph::default_auto_responses(),
-        max_auto_responses_per_task: 20,
-        cooldown: Duration::from_secs(3),
-        on_resting: ralph::OnResting::CheckInbox { path: inbox_path },
-        inbox_check_delay: Duration::from_secs(10),
-        auto_deploy: Some(auto_deploy),
-    };
+    );
 
     let handle = ralph::start_ralph_loop(
         ralph_config,

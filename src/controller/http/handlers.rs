@@ -231,8 +231,14 @@ pub async fn restart_session_handler(
     // Small delay to let tmux clean up
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    // Respawn with claude --continue in the same folder
-    let cmd = "claude --continue";
+    // Respawn with claude --continue in the same folder.
+    // The maintainer keeps its special launch flags (see start_maintainer).
+    let is_maintainer = session_id == crate::controller::maintainer::MAINTAINER_SESSION_ID;
+    let cmd = if is_maintainer {
+        "claude --continue --permission-mode auto"
+    } else {
+        "claude --continue"
+    };
     state.tmux.new_session(&session_id, &folder, cmd)
         .await
         .map_err(err)?;
@@ -286,8 +292,24 @@ pub async fn restart_session_handler(
         ralph_enabled: ralph_was_enabled,
     };
 
-    // Restart ralph loop if it was enabled before
-    if ralph_was_enabled {
+    // Restart ralph loop. The maintainer's loop (inbox + auto-deploy) was
+    // aborted above and is not covered by ralph_enabled, so recreate it
+    // explicitly — otherwise auto-deploy dies until the next server restart.
+    if is_maintainer {
+        let ralph_config = crate::controller::ralph::maintainer_ralph_config(
+            &state.config.data_dir,
+            &state.config.projects_dir,
+            state.deploy.clone(),
+            state.push.clone(),
+        );
+        let handle = crate::controller::ralph::start_ralph_loop(
+            ralph_config,
+            state.tmux.clone(),
+            state.session_states.clone(),
+        );
+        state.set_ralph_handle(&session_id, handle).await;
+        info!(session = %session_id, "Restarted maintainer ralph loop");
+    } else if ralph_was_enabled {
         state.toggle_ralph(&session_id, true, &state.tmux, &state.session_states, &state.config.data_dir).await;
     }
 

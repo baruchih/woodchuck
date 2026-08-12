@@ -125,6 +125,42 @@ pub fn default_session_ralph_config(session_id: &str, data_dir: &str) -> RalphCo
     }
 }
 
+/// Build the RalphConfig for the maintainer session (inbox + auto-deploy).
+///
+/// Used both at server startup and when the maintainer session is restarted
+/// via the API, so the auto-deploy loop always survives a restart.
+pub fn maintainer_ralph_config(
+    data_dir: &str,
+    fallback_repo_dir: &str,
+    deploy: DeployState,
+    push: Arc<dyn WebPushClient>,
+) -> RalphConfig {
+    let inbox_path = crate::controller::maintainer::inbox_dir(data_dir);
+
+    // The repo to monitor is the server's working directory (the woodchuck repo)
+    let repo_dir = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| fallback_repo_dir.to_string());
+
+    let auto_deploy = AutoDeployConfig {
+        repo_dir,
+        deploy,
+        push,
+        last_commit_file: PathBuf::from(data_dir).join("last-deploy-commit"),
+        data_dir: PathBuf::from(data_dir),
+    };
+
+    RalphConfig {
+        session_id: crate::controller::maintainer::MAINTAINER_SESSION_ID.to_string(),
+        auto_responses: default_auto_responses(),
+        max_auto_responses_per_task: 20,
+        cooldown: Duration::from_secs(3),
+        on_resting: OnResting::CheckInbox { path: inbox_path },
+        inbox_check_delay: Duration::from_secs(10),
+        auto_deploy: Some(auto_deploy),
+    }
+}
+
 /// Start a ralph loop for a session
 pub fn start_ralph_loop(
     config: RalphConfig,
