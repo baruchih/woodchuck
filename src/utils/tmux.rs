@@ -181,17 +181,24 @@ impl TmuxClient for Tmux {
                 Err(ModelError::TmuxError(stderr.to_string()))
             }
         } else {
-            // Literal text: send with -l flag, then sleep 100ms, then send Enter separately
-            // This matches wolfpack's tmuxSend pattern (serve.ts lines 109-119)
-            let output = Command::new("tmux")
-                .args(["send-keys", "-l", "-t", name, keys])
-                .output()
-                .await
-                .map_err(|e| ModelError::TmuxError(format!("Failed to run tmux: {}", e)))?;
+            if needs_bracketed_paste(keys) {
+                // Multi-line or long text typed via send-keys -l arrives as an
+                // unmarked keystroke burst, which TUIs like Claude Code can
+                // mangle (dropping the start). Deliver it as a real paste instead.
+                paste_text(name, keys).await?;
+            } else {
+                // Literal text: send with -l flag, then sleep 100ms, then send Enter separately
+                // This matches wolfpack's tmuxSend pattern (serve.ts lines 109-119)
+                let output = Command::new("tmux")
+                    .args(["send-keys", "-l", "-t", name, keys])
+                    .output()
+                    .await
+                    .map_err(|e| ModelError::TmuxError(format!("Failed to run tmux: {}", e)))?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(ModelError::TmuxError(stderr.to_string()));
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(ModelError::TmuxError(stderr.to_string()));
+                }
             }
 
             // 100ms delay to ensure text is in the buffer before Enter
@@ -330,6 +337,64 @@ pub fn parse_list_sessions(output: &str) -> Vec<TmuxSessionInfo> {
             }
         })
         .collect()
+}
+
+/// Text longer than this (in bytes) is delivered as a paste rather than typed
+const PASTE_THRESHOLD_BYTES: usize = 500;
+
+/// Whether text should be delivered via bracketed paste instead of send-keys -l
+fn needs_bracketed_paste(text: &str) -> bool {
+    text.contains('\n') || text.len() > PASTE_THRESHOLD_BYTES
+}
+
+/// Deliver text to a session as a single paste (no trailing Enter)
+///
+/// Loads the text into a per-session tmux buffer and pastes it with -p, so the
+/// app receives bracketed-paste markers when it has requested them.
+async fn paste_text(name: &str, text: &str) -> Result<(), ModelError> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+
+    let buffer = format!("woodchuck-input-{}", name);
+
+    let mut child = Command::new("tmux")
+        .args(["load-buffer", "-b", &buffer, "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| ModelError::TmuxError(format!("Failed to run tmux: {}", e)))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .await
+            .map_err(|e| ModelError::TmuxError(format!("Failed to write tmux buffer: {}", e)))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| ModelError::TmuxError(format!("Failed to run tmux: {}", e)))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(ModelError::TmuxError(stderr.to_string()));
+    }
+
+    // -p: bracketed paste if the app asked for it; -d: delete buffer afterwards;
+    // -r: keep \n as-is instead of converting line endings to \r (which would submit)
+    let output = Command::new("tmux")
+        .args(["paste-buffer", "-p", "-d", "-r", "-b", &buffer, "-t", name])
+        .output()
+        .await
+        .map_err(|e| ModelError::TmuxError(format!("Failed to run tmux: {}", e)))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(ModelError::TmuxError(stderr.to_string()));
+    }
+
+    debug!(session = %name, bytes = text.len(), "Pasted text to tmux session");
+    Ok(())
 }
 
 // =============================================================================
@@ -497,6 +562,14 @@ pub mod mock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_needs_bracketed_paste() {
+        assert!(!needs_bracketed_paste("short single line"));
+        assert!(needs_bracketed_paste("line one\nline two"));
+        assert!(needs_bracketed_paste(&"x".repeat(PASTE_THRESHOLD_BYTES + 1)));
+        assert!(!needs_bracketed_paste(&"x".repeat(PASTE_THRESHOLD_BYTES)));
+    }
 
     #[test]
     fn test_parse_list_sessions() {
