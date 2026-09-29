@@ -39,6 +39,14 @@ function isImage(name: string): boolean {
   return IMAGE_EXTENSIONS.has(ext);
 }
 
+// Extensions played in the browser's native video player
+const VIDEO_EXTENSIONS = new Set(['mp4', 'm4v', 'webm', 'mov']);
+
+function isVideo(name: string): boolean {
+  const ext = name.toLowerCase().split('.').pop() || '';
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -51,7 +59,7 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
   const [root, setRoot] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewingFile, setViewingFile] = useState<{ path: string; name: string; image?: boolean } | null>(null);
+  const [viewingFile, setViewingFile] = useState<{ path: string; name: string; image?: boolean; video?: boolean } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -210,8 +218,9 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
                       onClick={() => {
                         const textOk = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
                         const imgOk = isImage(entry.name) && (entry.size == null || entry.size <= 20 * 1024 * 1024);
-                        if (textOk || imgOk) {
-                          setViewingFile({ path: entry.path, name: entry.name, image: imgOk });
+                        const vidOk = isVideo(entry.name);
+                        if (textOk || imgOk || vidOk) {
+                          setViewingFile({ path: entry.path, name: entry.name, image: imgOk, video: vidOk });
                         }
                       }}
                     >
@@ -251,7 +260,7 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
       </div>
 
       {/* File viewer overlay */}
-      {viewingFile && !viewingFile.image && (
+      {viewingFile && !viewingFile.image && !viewingFile.video && (
         <FileViewer
           sessionId={sessionId}
           path={viewingFile.path}
@@ -261,6 +270,14 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
       )}
       {viewingFile && viewingFile.image && (
         <ImageViewer
+          sessionId={sessionId}
+          path={viewingFile.path}
+          name={viewingFile.name}
+          onClose={() => setViewingFile(null)}
+        />
+      )}
+      {viewingFile && viewingFile.video && (
+        <VideoViewer
           sessionId={sessionId}
           path={viewingFile.path}
           name={viewingFile.name}
@@ -280,7 +297,7 @@ function FileNode({
   entry: FileEntry;
   depth: number;
   sessionId: string;
-  onView: (file: { path: string; name: string; image?: boolean }) => void;
+  onView: (file: { path: string; name: string; image?: boolean; video?: boolean }) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileEntry[] | null>(null);
@@ -375,13 +392,14 @@ function FileNode({
   const downloadUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(entry.path)}`;
   const canViewText = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
   const canViewImage = isImage(entry.name) && (entry.size == null || entry.size <= 20 * 1024 * 1024);
-  const canView = canViewText || canViewImage;
+  const canViewVideo = isVideo(entry.name);
+  const canView = canViewText || canViewImage || canViewVideo;
 
   return (
     <div
       className={`flex items-center gap-1.5 py-1 px-2 rounded hover:bg-surface group ${canView ? 'cursor-pointer' : ''}`}
       style={{ paddingLeft: paddingLeft + 12 + 6 }}
-      onClick={canView ? () => onView({ path: entry.path, name: entry.name, image: canViewImage }) : undefined}
+      onClick={canView ? () => onView({ path: entry.path, name: entry.name, image: canViewImage, video: canViewVideo }) : undefined}
     >
       {/* File icon */}
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-text-muted shrink-0">
@@ -394,7 +412,7 @@ function FileNode({
         <button
           className="shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
           aria-label={`View ${entry.name}`}
-          onClick={(e) => { e.stopPropagation(); onView({ path: entry.path, name: entry.name, image: canViewImage }); }}
+          onClick={(e) => { e.stopPropagation(); onView({ path: entry.path, name: entry.name, image: canViewImage, video: canViewVideo }); }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -819,6 +837,75 @@ function ImageViewer({
       {/* Path */}
       <div className="px-3 py-1.5 border-t border-border shrink-0">
         <span className="text-[10px] text-text-muted truncate block">{path}</span>
+      </div>
+    </div>
+  );
+}
+
+function VideoViewer({
+  sessionId,
+  path,
+  name,
+  onClose,
+}: {
+  sessionId: string;
+  path: string;
+  name: string;
+  onClose: () => void;
+}) {
+  const [error, setError] = useState(false);
+  const query = `path=${encodeURIComponent(path)}`;
+  // Stream endpoint supports Range requests, which seeking (and iOS playback) requires
+  const streamUrl = `/api/sessions/${encodeURIComponent(sessionId)}/stream?${query}`;
+  const downloadUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?${query}`;
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-background">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text shrink-0 p-0.5"
+            aria-label="Back"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <span className="text-sm font-medium text-text truncate">{name}</span>
+        </div>
+        <a
+          href={downloadUrl}
+          download={name}
+          className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors shrink-0"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Download
+        </a>
+      </div>
+
+      {/* Video */}
+      <div className="flex-1 min-h-0 flex items-center justify-center bg-black p-2">
+        {error ? (
+          <p className="text-status-error text-sm text-center px-4">
+            This video can't be played in the browser (unsupported codec?) — try downloading it
+          </p>
+        ) : (
+          <video
+            src={streamUrl}
+            controls
+            autoPlay
+            playsInline
+            preload="metadata"
+            className="max-w-full max-h-full"
+            onError={() => setError(true)}
+          />
+        )}
       </div>
     </div>
   );

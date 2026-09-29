@@ -1716,14 +1716,14 @@ pub struct DownloadQuery {
     pub path: String,
 }
 
-/// GET /sessions/:id/download?path=relative/path — serve a file from the session's project folder
-#[instrument(skip(state))]
-pub async fn download_file_handler(
-    State(state): State<AppState>,
-    Path(session_id): Path<String>,
-    Query(query): Query<DownloadQuery>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ApiResponse<()>>)> {
-    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+/// Resolve a path relative to a session's project folder to a canonical file path,
+/// rejecting anything that escapes the folder or is a directory.
+async fn resolve_session_file(
+    state: &AppState,
+    session_id: &str,
+    path: &str,
+) -> Result<std::path::PathBuf, (StatusCode, Json<ApiResponse<()>>)> {
+    let session = crate::model::get_session(state.tmux.as_ref(), session_id)
         .await
         .map_err(err)?;
 
@@ -1733,7 +1733,7 @@ pub async fn download_file_handler(
     }
 
     // Resolve and canonicalize to prevent path traversal
-    let requested = root.join(&query.path);
+    let requested = root.join(path);
     let canonical = requested.canonicalize().map_err(|_| {
         err_msg(StatusCode::NOT_FOUND, "File not found", "FILE_NOT_FOUND")
     })?;
@@ -1748,6 +1748,18 @@ pub async fn download_file_handler(
     if canonical.is_dir() {
         return Err(err_msg(StatusCode::BAD_REQUEST, "Cannot download a directory", "INVALID_INPUT"));
     }
+
+    Ok(canonical)
+}
+
+/// GET /sessions/:id/download?path=relative/path — serve a file from the session's project folder
+#[instrument(skip(state))]
+pub async fn download_file_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiResponse<()>>)> {
+    let canonical = resolve_session_file(&state, &session_id, &query.path).await?;
 
     let file_bytes = tokio::fs::read(&canonical).await.map_err(|_| {
         err_msg(StatusCode::NOT_FOUND, "File not found", "FILE_NOT_FOUND")
@@ -1774,6 +1786,29 @@ pub async fn download_file_handler(
         ],
         file_bytes,
     ))
+}
+
+/// GET /sessions/:id/stream?path=relative/path — serve a file inline for media playback
+///
+/// Unlike download, this streams from disk with a guessed Content-Type and
+/// honors Range requests, which browsers need to seek (and iOS needs to play) video.
+#[instrument(skip(state, request))]
+pub async fn stream_file_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Query(query): Query<DownloadQuery>,
+    request: axum::extract::Request,
+) -> Result<axum::response::Response, (StatusCode, Json<ApiResponse<()>>)> {
+    let canonical = resolve_session_file(&state, &session_id, &query.path).await?;
+
+    debug!(session = %session_id, path = %query.path, "Streaming file");
+
+    let response = tower_http::services::ServeFile::new(&canonical)
+        .try_call(request)
+        .await
+        .map_err(|_| err_msg(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read file", "IO_ERROR"))?;
+
+    Ok(response.map(axum::body::Body::new))
 }
 
 /// GET /sessions/:id/download-folder?path=relative/path — download folder as zip
