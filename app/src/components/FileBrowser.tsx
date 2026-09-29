@@ -39,12 +39,17 @@ function isImage(name: string): boolean {
   return IMAGE_EXTENSIONS.has(ext);
 }
 
-// Extensions played in the browser's native video player
+// Extensions played in the browser's native media players
 const VIDEO_EXTENSIONS = new Set(['mp4', 'm4v', 'webm', 'mov']);
+const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac']);
 
-function isVideo(name: string): boolean {
+type MediaKind = 'video' | 'audio';
+
+function mediaKind(name: string): MediaKind | undefined {
   const ext = name.toLowerCase().split('.').pop() || '';
-  return VIDEO_EXTENSIONS.has(ext);
+  if (VIDEO_EXTENSIONS.has(ext)) return 'video';
+  if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
+  return undefined;
 }
 
 function formatSize(bytes: number): string {
@@ -59,7 +64,7 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
   const [root, setRoot] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewingFile, setViewingFile] = useState<{ path: string; name: string; image?: boolean; video?: boolean } | null>(null);
+  const [viewingFile, setViewingFile] = useState<{ path: string; name: string; image?: boolean; media?: MediaKind } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -218,9 +223,9 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
                       onClick={() => {
                         const textOk = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
                         const imgOk = isImage(entry.name) && (entry.size == null || entry.size <= 20 * 1024 * 1024);
-                        const vidOk = isVideo(entry.name);
-                        if (textOk || imgOk || vidOk) {
-                          setViewingFile({ path: entry.path, name: entry.name, image: imgOk, video: vidOk });
+                        const media = mediaKind(entry.name);
+                        if (textOk || imgOk || media) {
+                          setViewingFile({ path: entry.path, name: entry.name, image: imgOk, media });
                         }
                       }}
                     >
@@ -260,7 +265,7 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
       </div>
 
       {/* File viewer overlay */}
-      {viewingFile && !viewingFile.image && !viewingFile.video && (
+      {viewingFile && !viewingFile.image && !viewingFile.media && (
         <FileViewer
           sessionId={sessionId}
           path={viewingFile.path}
@@ -276,8 +281,9 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
           onClose={() => setViewingFile(null)}
         />
       )}
-      {viewingFile && viewingFile.video && (
-        <VideoViewer
+      {viewingFile && viewingFile.media && (
+        <MediaViewer
+          kind={viewingFile.media}
           sessionId={sessionId}
           path={viewingFile.path}
           name={viewingFile.name}
@@ -297,7 +303,7 @@ function FileNode({
   entry: FileEntry;
   depth: number;
   sessionId: string;
-  onView: (file: { path: string; name: string; image?: boolean; video?: boolean }) => void;
+  onView: (file: { path: string; name: string; image?: boolean; media?: MediaKind }) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileEntry[] | null>(null);
@@ -392,14 +398,14 @@ function FileNode({
   const downloadUrl = `/api/sessions/${encodeURIComponent(sessionId)}/download?path=${encodeURIComponent(entry.path)}`;
   const canViewText = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
   const canViewImage = isImage(entry.name) && (entry.size == null || entry.size <= 20 * 1024 * 1024);
-  const canViewVideo = isVideo(entry.name);
-  const canView = canViewText || canViewImage || canViewVideo;
+  const media = mediaKind(entry.name);
+  const canView = canViewText || canViewImage || !!media;
 
   return (
     <div
       className={`flex items-center gap-1.5 py-1 px-2 rounded hover:bg-surface group ${canView ? 'cursor-pointer' : ''}`}
       style={{ paddingLeft: paddingLeft + 12 + 6 }}
-      onClick={canView ? () => onView({ path: entry.path, name: entry.name, image: canViewImage, video: canViewVideo }) : undefined}
+      onClick={canView ? () => onView({ path: entry.path, name: entry.name, image: canViewImage, media }) : undefined}
     >
       {/* File icon */}
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-text-muted shrink-0">
@@ -412,7 +418,7 @@ function FileNode({
         <button
           className="shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
           aria-label={`View ${entry.name}`}
-          onClick={(e) => { e.stopPropagation(); onView({ path: entry.path, name: entry.name, image: canViewImage, video: canViewVideo }); }}
+          onClick={(e) => { e.stopPropagation(); onView({ path: entry.path, name: entry.name, image: canViewImage, media }); }}
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -842,12 +848,14 @@ function ImageViewer({
   );
 }
 
-function VideoViewer({
+function MediaViewer({
+  kind,
   sessionId,
   path,
   name,
   onClose,
 }: {
+  kind: MediaKind;
   sessionId: string;
   path: string;
   name: string;
@@ -889,24 +897,48 @@ function VideoViewer({
         </a>
       </div>
 
-      {/* Video */}
-      <div className="flex-1 min-h-0 flex items-center justify-center bg-black p-2">
-        {error ? (
-          <p className="text-status-error text-sm text-center px-4">
-            This video can't be played in the browser (unsupported codec?) — try downloading it
-          </p>
-        ) : (
-          <video
-            src={streamUrl}
-            controls
-            autoPlay
-            playsInline
-            preload="metadata"
-            className="max-w-full max-h-full"
-            onError={() => setError(true)}
-          />
-        )}
-      </div>
+      {/* Player */}
+      {kind === 'video' ? (
+        <div className="flex-1 min-h-0 flex items-center justify-center bg-black p-2">
+          {error ? (
+            <p className="text-status-error text-sm text-center px-4">
+              This video can't be played in the browser (unsupported codec?) — try downloading it
+            </p>
+          ) : (
+            <video
+              src={streamUrl}
+              controls
+              autoPlay
+              playsInline
+              preload="metadata"
+              className="max-w-full max-h-full"
+              onError={() => setError(true)}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-4 p-4">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-16 h-16 text-text-muted">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+          {error ? (
+            <p className="text-status-error text-sm text-center px-4">
+              This audio can't be played in the browser (unsupported format?) — try downloading it
+            </p>
+          ) : (
+            <audio
+              src={streamUrl}
+              controls
+              autoPlay
+              preload="metadata"
+              className="w-full max-w-md"
+              onError={() => setError(true)}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
