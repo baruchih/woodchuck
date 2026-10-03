@@ -3,7 +3,7 @@
 //! Handles individual WebSocket connections: message parsing, subscription
 //! management, and message routing.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use super::messages::{ClientMessage, ServerMessage};
+use super::terminal_stream;
 use crate::config::Config;
 use crate::controller::poller::{add_subscriber, remove_subscriber, SubscriberMap};
 use crate::model::{
@@ -55,6 +56,9 @@ pub async fn handle_connection(
     // Track subscriptions for this connection
     let subscriptions: Arc<tokio::sync::RwLock<HashSet<String>>> =
         Arc::new(tokio::sync::RwLock::new(HashSet::new()));
+
+    // Live terminal stream task per subscribed session
+    let mut terminal_streams: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
 
     // Task to forward messages from channel to WebSocket
     let send_task = tokio::spawn(async move {
@@ -153,8 +157,17 @@ pub async fn handle_connection(
                     &subscriptions,
                 )
                 .await;
+                if subscriptions.read().await.contains(&session_id) {
+                    let stream = tokio::spawn(terminal_stream::run(session_id.clone(), tx.clone()));
+                    if let Some(old) = terminal_streams.insert(session_id, stream) {
+                        old.abort();
+                    }
+                }
             }
             ClientMessage::Unsubscribe { session_id } => {
+                if let Some(stream) = terminal_streams.remove(&session_id) {
+                    stream.abort();
+                }
                 handle_unsubscribe(&session_id, &subscriptions, &session_states, &subscribers).await;
                 let _ = tx.try_send(ServerMessage::Unsubscribed { session_id });
             }
@@ -210,6 +223,10 @@ pub async fn handle_connection(
         for session_id in subs.iter() {
             remove_subscriber(&subscribers, &session_states, session_id).await;
         }
+    }
+
+    for stream in terminal_streams.into_values() {
+        stream.abort();
     }
 
     // Abort send task and broadcast forwarding task

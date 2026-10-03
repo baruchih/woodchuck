@@ -92,7 +92,8 @@ export function ShellPanel({ sessionId, onClose }: ShellPanelProps) {
 /** Terminal display for the shell */
 function ShellTerminal({ shellId }: { shellId: string }) {
   const { sendRawInput, resize } = useWS();
-  const { content } = useSessionOutput({ sessionId: shellId });
+  // Subscribes to the shell session; XtermTerminal renders its stream
+  useSessionOutput({ sessionId: shellId });
   const { fontSize } = useTerminalFontSize();
 
   const handleInput = useCallback((data: string) => {
@@ -106,7 +107,6 @@ function ShellTerminal({ shellId }: { shellId: string }) {
   return (
     <XtermTerminal
       sessionId={shellId}
-      content={content}
       fontSize={fontSize}
       onInput={handleInput}
       onResize={handleResize}

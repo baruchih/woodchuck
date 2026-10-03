@@ -1,12 +1,13 @@
 import { useEffect, useCallback, useState, useRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { useXterm } from '../hooks/useXterm';
+import { useWS } from '../context/WebSocketContext';
 
 // ── Interface ──
 
 export interface XtermTerminalProps {
+  /** Session whose live terminal stream is rendered */
   sessionId: string;
-  content: string;
   fontSize: number;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
@@ -14,25 +15,23 @@ export interface XtermTerminalProps {
   onZoomOut: () => void;
   /** When true, tapping the terminal won't open the keyboard (mobile input bar handles input) */
   disableKeyboard?: boolean;
-  /** Increment to force a terminal refresh (resets stuck write state) */
-  refreshKey?: number;
   className?: string;
 }
 
 // ── Component ──
 
 export function XtermTerminal({
-  content,
+  sessionId,
   fontSize,
   onInput,
   onResize,
   onZoomIn,
   onZoomOut,
   disableKeyboard = false,
-  refreshKey = 0,
   className = '',
 }: XtermTerminalProps) {
-  const { containerRef, write, resetWriteState, focus, scrollLines, getTextContent, dimensions } = useXterm({
+  const { onTerminal } = useWS();
+  const { containerRef, writeData, focus, scrollLines, getTextContent, dimensions } = useXterm({
     fontSize,
     onInput,
     onResize,
@@ -44,17 +43,12 @@ export function XtermTerminal({
   const [selectViewportLine, setSelectViewportLine] = useState(0);
   const selectPreRef = useRef<HTMLPreElement>(null);
 
-  // Reset xterm write state when refreshKey changes (user hit refresh)
+  // Render the session's live terminal stream (snapshots on (re)subscribe, then raw output)
   useEffect(() => {
-    if (refreshKey > 0) {
-      resetWriteState();
-    }
-  }, [refreshKey, resetWriteState]);
-
-  // Write content when it changes (or after a refresh reset)
-  useEffect(() => {
-    write(content);
-  }, [content, write, refreshKey]);
+    return onTerminal((msg) => {
+      if (msg.session_id === sessionId) writeData(msg.data, msg.reset);
+    });
+  }, [sessionId, onTerminal, writeData]);
 
   // Touch handling: single-finger momentum scroll + two-finger pinch-to-zoom + long-press select
   useEffect(() => {

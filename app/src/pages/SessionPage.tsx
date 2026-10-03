@@ -62,7 +62,6 @@ export function SessionPage() {
   // Detect mobile (touch device with narrow screen)
   const isMobile = 'ontouchstart' in window && window.innerWidth < 768;
 
-  const [refreshKey, setRefreshKey] = useState(0);
 
   // WebSocket-based terminal output (replaces HTTP polling)
   const { content, needsAttention, contextActions, triggerFastPoll, notifySentText, forceRefresh } = useSessionOutput({
@@ -338,9 +337,8 @@ export function SessionPage() {
     }
   }, [decodedId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
 
-  // Refresh terminal — resets stuck write state and re-fetches content via HTTP
+  // Refresh terminal — resubscribes, which sends a fresh snapshot
   const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
     forceRefresh();
   }, [forceRefresh]);
 
@@ -453,14 +451,12 @@ export function SessionPage() {
           <div className={`flex-1 min-h-0 overflow-hidden ${attentionClass}`}>
             <XtermTerminal
               sessionId={decodedId}
-              content={content}
               fontSize={fontSize}
               onInput={handleTerminalInput}
               onResize={handleTerminalResize}
               onZoomIn={zoomIn}
               onZoomOut={zoomOut}
               disableKeyboard={isMobile}
-              refreshKey={refreshKey}
             />
           </div>
 

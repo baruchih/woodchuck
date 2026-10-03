@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import type {
-  ServerMessage, OutputMessage, StatusMessage, ErrorMessage, ClientMessage,
+  ServerMessage, OutputMessage, TerminalMessage, StatusMessage, ErrorMessage, ClientMessage,
   SubscribedMessage, SessionsMessage, SessionCreatedMessage, SessionDeletedMessage,
   SessionUpdatedMessage, SessionEndedMessage,
 } from '../types';
@@ -20,6 +20,7 @@ interface WebSocketContextValue {
   sendRawInput: (sessionId: string, data: string) => void;
   resize: (sessionId: string, cols: number, rows: number) => void;
   onOutput: (callback: (msg: OutputMessage) => void) => () => void;
+  onTerminal: (callback: (msg: TerminalMessage) => void) => () => void;
   onStatus: (callback: (msg: StatusMessage) => void) => () => void;
   onError: (callback: (msg: ErrorMessage) => void) => () => void;
   wsRequest: <T>(msg: ClientMessage) => Promise<T>;
@@ -51,6 +52,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const subscriptionsRef = useRef<Set<string>>(new Set());
 
   const outputListenersRef = useRef<Set<(msg: OutputMessage) => void>>(new Set());
+  const terminalListenersRef = useRef<Set<(msg: TerminalMessage) => void>>(new Set());
   const statusListenersRef = useRef<Set<(msg: StatusMessage) => void>>(new Set());
   const errorListenersRef = useRef<Set<(msg: ErrorMessage) => void>>(new Set());
   const sessionsListenersRef = useRef<Set<(msg: SessionsMessage) => void>>(new Set());
@@ -148,6 +150,9 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
         switch (msg.type) {
           case 'output':
             outputListenersRef.current.forEach((cb) => cb(msg));
+            break;
+          case 'terminal':
+            terminalListenersRef.current.forEach((cb) => cb(msg));
             break;
           case 'status':
             statusListenersRef.current.forEach((cb) => cb(msg));
@@ -273,6 +278,13 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     };
   }, []);
 
+  const onTerminal = useCallback((callback: (msg: TerminalMessage) => void) => {
+    terminalListenersRef.current.add(callback);
+    return () => {
+      terminalListenersRef.current.delete(callback);
+    };
+  }, []);
+
   const onStatus = useCallback((callback: (msg: StatusMessage) => void) => {
     statusListenersRef.current.add(callback);
     return () => {
@@ -361,6 +373,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     sendRawInput,
     resize,
     onOutput,
+    onTerminal,
     onStatus,
     onError,
     wsRequest,

@@ -58,6 +58,14 @@ export interface OutputMessage {
   timestamp: string;
 }
 
+/** Raw terminal bytes from a session's pane. `reset` = full snapshot: clear the terminal first. */
+export interface TerminalMessage {
+  type: 'terminal';
+  session_id: string;
+  data: string;
+  reset: boolean;
+}
+
 export interface StatusMessage {
   type: 'status';
   session_id: string;
@@ -123,7 +131,7 @@ export interface AckMessage {
   success: boolean;
 }
 
-export type ServerMessage = OutputMessage | StatusMessage | ErrorMessage | SessionEndedMessage
+export type ServerMessage = OutputMessage | TerminalMessage | StatusMessage | ErrorMessage | SessionEndedMessage
   | SubscribedMessage | SessionsMessage | SessionDetailMessage | SessionCreatedMessage
   | SessionDeletedMessage | SessionUpdatedMessage | AckMessage;
 

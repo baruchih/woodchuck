@@ -34,7 +34,6 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showInfoSheet, setShowInfoSheet] = useState(false);
   const [infoSession, setInfoSession] = useState<Session | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
 
@@ -125,7 +124,6 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   }, [sessionId, sendInput, triggerFastPoll]);
 
   const handleRefresh = useCallback(() => {
-    setRefreshKey((k) => k + 1);
     forceRefresh();
   }, [forceRefresh]);
 
@@ -200,14 +198,12 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       <div className="flex-1 min-h-0 overflow-hidden">
         <XtermTerminal
           sessionId={sessionId}
-          content={content}
           fontSize={fontSize}
           onInput={handleTerminalInput}
           onResize={handleResize}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           disableKeyboard={!focused}
-          refreshKey={refreshKey}
         />
       </div>
 

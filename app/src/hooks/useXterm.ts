@@ -14,8 +14,8 @@ interface UseXtermParams {
 
 interface UseXtermReturn {
   containerRef: React.RefObject<HTMLDivElement>;
-  write: (content: string) => void;
-  resetWriteState: () => void;
+  /** Append raw terminal bytes, or replace everything when `reset` (a snapshot) */
+  writeData: (data: string, reset: boolean) => void;
   focus: () => void;
   blur: () => void;
   scrollLines: (n: number) => void;
@@ -52,32 +52,32 @@ const XTERM_THEME = {
   brightWhite: '#ffffff',
 };
 
-// ── Internal write helper (not a hook — plain function for recursive use) ──
+// ── Query suppression ──
 
-/** Write content to the terminal, clearing scrollback first. After the write
- *  completes, automatically flushes any content that arrived during the write. */
-function doTerminalWrite(
-  terminal: Terminal,
-  content: string,
-  lastContentRef: React.MutableRefObject<string>,
-  pendingContentRef: React.MutableRefObject<string | null>,
-  writingRef: React.MutableRefObject<boolean>,
-) {
-  lastContentRef.current = content;
-  pendingContentRef.current = null;
-  writingRef.current = true;
-
-  terminal.write('\x1b[3J\x1b[H\x1b[J' + content, () => {
-    terminal.scrollToBottom();
-    writingRef.current = false;
-
-    // Flush any content that arrived while this write was in progress
-    const pending = pendingContentRef.current;
-    if (pending !== null && pending !== lastContentRef.current) {
-      doTerminalWrite(terminal, pending, lastContentRef, pendingContentRef, writingRef);
-    }
-  });
+/** tmux is the real terminal for the app and already answers its queries
+ *  (device attributes, cursor position, colors...). Swallow them here so
+ *  xterm's own replies don't get forwarded as typed input. */
+function suppressQueryReplies(terminal: Terminal) {
+  const swallow = () => true;
+  const p = terminal.parser;
+  p.registerCsiHandler({ final: 'c' }, swallow); // DA1
+  p.registerCsiHandler({ prefix: '>', final: 'c' }, swallow); // DA2
+  p.registerCsiHandler({ final: 'n' }, swallow); // DSR / cursor position report
+  p.registerCsiHandler({ prefix: '?', final: 'n' }, swallow);
+  p.registerCsiHandler({ intermediates: '$', final: 'p' }, swallow); // DECRQM
+  p.registerCsiHandler({ prefix: '?', intermediates: '$', final: 'p' }, swallow);
+  p.registerCsiHandler({ prefix: '>', final: 'q' }, swallow); // XTVERSION
+  p.registerCsiHandler({ final: 't' }, swallow); // window reports
+  p.registerDcsHandler({ intermediates: '$', final: 'q' }, swallow); // DECRQSS
+  p.registerDcsHandler({ intermediates: '+', final: 'q' }, swallow); // XTGETTCAP
+  // Color queries ("?"); color changes still apply
+  for (const id of [4, 10, 11, 12]) {
+    p.registerOscHandler(id, (data) => data.includes('?'));
+  }
 }
+
+/** Focus in/out reports — tmux tracks focus itself */
+const FOCUS_REPORTS = new Set(['\x1b[I', '\x1b[O']);
 
 // ── Hook ──
 
@@ -89,9 +89,6 @@ export function useXterm({
   const containerRef = useRef<HTMLDivElement>(null!);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const lastContentRef = useRef<string>('');
-  const pendingContentRef = useRef<string | null>(null);
-  const writingRef = useRef(false); // true while we're writing content (ignore scroll events)
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
@@ -109,8 +106,9 @@ export function useXterm({
       fontSize,
       lineHeight: 1.4,
       theme: XTERM_THEME,
-      scrollback: 5000,
-      convertEol: true,
+      scrollback: 10000,
+      // Raw pty output already has \r\n
+      convertEol: false,
       allowProposedApi: true,
     });
 
@@ -126,6 +124,8 @@ export function useXterm({
     terminal.loadAddon(canvasAddon);
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
+
+    suppressQueryReplies(terminal);
 
     // Store refs
     terminalRef.current = terminal;
@@ -158,26 +158,13 @@ export function useXterm({
 
     // Handle keyboard input (desktop only — mobile uses a separate input bar)
     const inputDisposable = terminal.onData((data) => {
+      if (FOCUS_REPORTS.has(data)) return;
       onInputRef.current(data);
-    });
-
-    // When user scrolls back to bottom, flush any pending (deferred) content
-    const scrollDisposable = terminal.onScroll(() => {
-      // Ignore scroll events caused by our own writes
-      if (writingRef.current) return;
-
-      const viewport = terminal.buffer.active;
-      const isAtBottom = viewport.baseY <= viewport.viewportY;
-
-      if (isAtBottom && pendingContentRef.current !== null) {
-        doTerminalWrite(terminal, pendingContentRef.current, lastContentRef, pendingContentRef, writingRef);
-      }
     });
 
     // Cleanup
     return () => {
       inputDisposable.dispose();
-      scrollDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -205,8 +192,8 @@ export function useXterm({
 
   // Handle container resize — refit when WIDTH changes or on orientation change.
   // Height-only changes (mobile keyboard open/close) should not refit,
-  // because refitting triggers a full terminal clear + rewrite which
-  // causes a visible jump. The terminal scrolls naturally instead.
+  // because resizing the session makes the app redraw, which causes a
+  // visible jump. The terminal scrolls naturally instead.
   useEffect(() => {
     const container = containerRef.current;
     const fitAddon = fitAddonRef.current;
@@ -253,42 +240,17 @@ export function useXterm({
     };
   }, [onResize]);
 
-  // Write content to terminal (full screen rewrite)
-  // If user has scrolled up, defer the update until they scroll back to bottom
-  const write = useCallback((content: string) => {
+  // Write streamed terminal data. A snapshot replaces everything; otherwise
+  // append. xterm keeps the viewport where it is if the user scrolled up.
+  const writeData = useCallback((data: string, reset: boolean) => {
     const terminal = terminalRef.current;
     if (!terminal) return;
-
-    // Skip if content unchanged
-    if (content === lastContentRef.current) return;
-
-    // If a write is in progress, queue this content — it will be flushed
-    // when the current write's callback fires. This prevents checking
-    // isAtBottom during a write (when the buffer is in an intermediate
-    // state and baseY > viewportY even though the user didn't scroll).
-    if (writingRef.current) {
-      pendingContentRef.current = content;
-      return;
+    if (reset) {
+      terminal.reset();
+      terminal.write(data, () => terminal.scrollToBottom());
+    } else {
+      terminal.write(data);
     }
-
-    // Check actual scroll position — if user scrolled up, defer
-    const viewport = terminal.buffer.active;
-    const isAtBottom = viewport.baseY <= viewport.viewportY;
-
-    if (!isAtBottom) {
-      pendingContentRef.current = content;
-      return;
-    }
-
-    doTerminalWrite(terminal, content, lastContentRef, pendingContentRef, writingRef);
-  }, []);
-
-  // Reset internal write state — unsticks writingRef and clears content tracking
-  // so the next write() call will force a full rewrite
-  const resetWriteState = useCallback(() => {
-    writingRef.current = false;
-    lastContentRef.current = '';
-    pendingContentRef.current = null;
   }, []);
 
   // Focus terminal
@@ -324,8 +286,7 @@ export function useXterm({
 
   return {
     containerRef,
-    write,
-    resetWriteState,
+    writeData,
     focus,
     blur,
     scrollLines,

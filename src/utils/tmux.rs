@@ -227,10 +227,11 @@ impl TmuxClient for Tmux {
         let key = match data {
             "\r" | "\n" => "Enter",
             "\x1b" => "Escape",
-            "\x1b[A" => "Up",
-            "\x1b[B" => "Down",
-            "\x1b[C" => "Right",
-            "\x1b[D" => "Left",
+            // Application cursor mode (DECCKM) sends ESC O instead of ESC [
+            "\x1b[A" | "\x1bOA" => "Up",
+            "\x1b[B" | "\x1bOB" => "Down",
+            "\x1b[C" | "\x1bOC" => "Right",
+            "\x1b[D" | "\x1bOD" => "Left",
             "\t" => "Tab",
             "\x1b[Z" => "BTab",
             "\x02" => "C-b",
@@ -239,8 +240,8 @@ impl TmuxClient for Tmux {
             "\x1a" => "C-z",
             "\x7f" | "\x08" => "BSpace",
             "\x1b[3~" => "DC",  // Delete key
-            "\x1b[H" => "Home",
-            "\x1b[F" => "End",
+            "\x1b[H" | "\x1bOH" => "Home",
+            "\x1b[F" | "\x1bOF" => "End",
             "\x1b[5~" => "PageUp",
             "\x1b[6~" => "PageDown",
             _ => "",

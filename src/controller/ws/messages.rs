@@ -95,6 +95,15 @@ pub enum ServerMessage {
         timestamp: String,
     },
 
+    /// Raw terminal bytes streamed from a session's pane. When `reset` is true,
+    /// `data` is a full snapshot (history + screen) and the client clears its
+    /// terminal before writing it; otherwise `data` is appended.
+    Terminal {
+        session_id: String,
+        data: String,
+        reset: bool,
+    },
+
     /// Session status changed
     Status {
         session_id: String,
