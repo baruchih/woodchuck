@@ -4,6 +4,7 @@ import { CanvasAddon } from '@xterm/addon-canvas';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { decodeOsc52 } from '../utils/osc52';
+import { createResizeScheduler } from '../utils/resizeScheduler';
 
 // ── Interface ──
 
@@ -98,6 +99,14 @@ export function useXterm({
   onInputRef.current = onInput;
   const onCopyBlockedRef = useRef(onCopyBlocked);
   onCopyBlockedRef.current = onCopyBlocked;
+  const onResizeRef = useRef(onResize);
+  onResizeRef.current = onResize;
+  // Every session resize makes the app redraw: send one per settled layout change
+  const resizeSchedulerRef = useRef<ReturnType<typeof createResizeScheduler> | null>(null);
+  if (!resizeSchedulerRef.current) {
+    resizeSchedulerRef.current = createResizeScheduler((size) => onResizeRef.current(size.cols, size.rows));
+  }
+  const scheduleResize = resizeSchedulerRef.current.request;
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
 
   // Initialize terminal
@@ -169,7 +178,7 @@ export function useXterm({
         fitAddon.fit();
         const dims = { cols: terminal.cols, rows: terminal.rows };
         setDimensions(dims);
-        onResize(dims.cols, dims.rows);
+        scheduleResize(dims);
       } catch (e) {
         if (fitAttempts < 5) {
           requestAnimationFrame(tryFit);
@@ -187,6 +196,7 @@ export function useXterm({
     // Cleanup
     return () => {
       inputDisposable.dispose();
+      resizeSchedulerRef.current?.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -206,11 +216,27 @@ export function useXterm({
       fitAddon.fit();
       const dims = { cols: terminal.cols, rows: terminal.rows };
       setDimensions(dims);
-      onResize(dims.cols, dims.rows);
+      scheduleResize(dims);
     } catch (e) {
       console.error('Font size change fit failed:', e);
     }
-  }, [fontSize, onResize]);
+  }, [fontSize, scheduleResize]);
+
+  // Coming back to this window or tab: take the session's size back, even if
+  // this view's size didn't change (another device may have resized it meanwhile)
+  useEffect(() => {
+    const reclaim = () => {
+      const terminal = terminalRef.current;
+      if (!terminal || document.visibilityState !== 'visible') return;
+      scheduleResize({ cols: terminal.cols, rows: terminal.rows }, { force: true });
+    };
+    window.addEventListener('focus', reclaim);
+    document.addEventListener('visibilitychange', reclaim);
+    return () => {
+      window.removeEventListener('focus', reclaim);
+      document.removeEventListener('visibilitychange', reclaim);
+    };
+  }, [scheduleResize]);
 
   // Handle container resize — refit when WIDTH changes or on orientation change.
   // Height-only changes (mobile keyboard open/close) should not refit,
@@ -232,7 +258,7 @@ export function useXterm({
           fitAddon.fit();
           const dims = { cols: terminal.cols, rows: terminal.rows };
           setDimensions(dims);
-          onResize(dims.cols, dims.rows);
+          scheduleResize(dims);
           lastWidth = container.clientWidth;
         } catch (e) {
           console.error('Resize fit failed:', e);
@@ -260,7 +286,7 @@ export function useXterm({
       window.removeEventListener('orientationchange', handleOrientation);
       screen.orientation?.removeEventListener('change', handleOrientation);
     };
-  }, [onResize]);
+  }, [scheduleResize]);
 
   // Write streamed terminal data. A snapshot replaces everything; otherwise
   // append. xterm keeps the viewport where it is if the user scrolled up.
