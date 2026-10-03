@@ -31,7 +31,7 @@ export function XtermTerminal({
   className = '',
 }: XtermTerminalProps) {
   const { onTerminal } = useWS();
-  const { containerRef, writeData, focus, scrollLines, getTextContent, dimensions } = useXterm({
+  const { containerRef, writeData, focus, scrollLines, isMouseTracking, getTextContent, dimensions } = useXterm({
     fontSize,
     onInput,
     onResize,
@@ -169,10 +169,20 @@ export function XtermTerminal({
           velocityY = velocityY * 0.6 + instantVelocity * 0.4;
         }
 
+        // xterm.js handles touch-drag scrolling of its own scrollback, but not
+        // when the app tracks the mouse — then drag scrolls the app via wheel events
+        if (isMouseTracking()) {
+          e.preventDefault();
+          pixelRemainder += lastTouchY - touchY;
+          const lines = Math.trunc(pixelRemainder / pxPerLine);
+          if (lines !== 0) {
+            scrollLines(lines);
+            pixelRemainder -= lines * pxPerLine;
+          }
+        }
+
         lastTouchY = touchY;
         lastTouchTime = now;
-        // xterm.js handles the actual touch-drag scrolling;
-        // we just track velocity for the momentum phase
       }
     };
 
@@ -241,7 +251,7 @@ export function XtermTerminal({
       container.removeEventListener('touchmove', handleTouchMove);
       container.removeEventListener('touchend', handleTouchEnd);
     };
-  }, [containerRef, onZoomIn, onZoomOut, fontSize, scrollLines, getTextContent]);
+  }, [containerRef, onZoomIn, onZoomOut, fontSize, scrollLines, isMouseTracking, getTextContent]);
 
   // Scroll the select overlay to match the terminal viewport position
   useEffect(() => {

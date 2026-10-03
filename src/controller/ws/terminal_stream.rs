@@ -28,7 +28,8 @@ const RESIZE_SNAPSHOT_DELAY: Duration = Duration::from_millis(500);
 
 /// Format for the pane state queried alongside each snapshot
 const PANE_STATE_FORMAT: &str = "#{pane_id} #{cursor_x} #{cursor_y} #{pane_height} #{alternate_on} \
-#{cursor_flag} #{keypad_cursor_flag} #{scroll_region_upper} #{scroll_region_lower}";
+#{cursor_flag} #{keypad_cursor_flag} #{scroll_region_upper} #{scroll_region_lower} \
+#{mouse_standard_flag} #{mouse_button_flag} #{mouse_all_flag} #{mouse_sgr_flag}";
 
 /// Stream a session's terminal to `tx` until the session ends or the receiver
 /// is dropped. Intended to be spawned as a task and aborted on unsubscribe.
@@ -250,13 +251,18 @@ struct PaneState {
     keypad_cursor: bool,
     scroll_upper: u32,
     scroll_lower: u32,
+    /// Mouse reporting modes (1000 / 1002 / 1003) and SGR encoding (1006)
+    mouse_standard: bool,
+    mouse_button: bool,
+    mouse_all: bool,
+    mouse_sgr: bool,
 }
 
 impl PaneState {
     fn parse(line: &[u8]) -> Option<Self> {
         let s = std::str::from_utf8(line).ok()?;
         let f: Vec<&str> = s.split_whitespace().collect();
-        if f.len() != 9 || !f[0].starts_with('%') {
+        if f.len() != 13 || !f[0].starts_with('%') {
             return None;
         }
         let n = |i: usize| f[i].parse::<u32>().ok();
@@ -270,6 +276,10 @@ impl PaneState {
             keypad_cursor: f[6] == "1",
             scroll_upper: n(7)?,
             scroll_lower: n(8)?,
+            mouse_standard: f[9] == "1",
+            mouse_button: f[10] == "1",
+            mouse_all: f[11] == "1",
+            mouse_sgr: f[12] == "1",
         })
     }
 }
@@ -291,6 +301,18 @@ fn build_snapshot(capture: &[Vec<u8>], state: &PaneState) -> String {
     s.push_str(&format!("\x1b[{};{}H", state.cursor_y + 1, state.cursor_x + 1));
     if state.keypad_cursor {
         s.push_str("\x1b[?1h");
+    }
+    // Restore mouse reporting so the client forwards wheel/clicks to apps that asked
+    // for them (e.g. Claude Code's fullscreen renderer scrolls on mouse wheel)
+    for (on, mode) in [
+        (state.mouse_standard, 1000),
+        (state.mouse_button, 1002),
+        (state.mouse_all, 1003),
+        (state.mouse_sgr, 1006),
+    ] {
+        if on {
+            s.push_str(&format!("\x1b[?{}h", mode));
+        }
     }
     if !state.cursor_visible {
         s.push_str("\x1b[?25l");
@@ -456,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_pane_state_parse() {
-        let s = PaneState::parse(b"%3 4 10 24 0 1 0 0 23").unwrap();
+        let s = PaneState::parse(b"%3 4 10 24 0 1 0 0 23 0 0 0 0").unwrap();
         assert_eq!(s.pane_id, "%3");
         assert_eq!((s.cursor_x, s.cursor_y, s.height), (4, 10, 24));
         assert!(s.cursor_visible && !s.alternate_on && !s.keypad_cursor);
@@ -465,7 +487,7 @@ mod tests {
 
     #[test]
     fn test_build_snapshot() {
-        let state = PaneState::parse(b"%3 2 1 2 0 0 1 0 1").unwrap();
+        let state = PaneState::parse(b"%3 2 1 2 0 0 1 0 1 0 0 0 0").unwrap();
         let capture = vec![b"history".to_vec(), b"\x1b[31mscreen1".to_vec(), b"$ ".to_vec()];
         assert_eq!(
             build_snapshot(&capture, &state),
@@ -475,10 +497,10 @@ mod tests {
 
     #[test]
     fn test_build_snapshot_scroll_region_and_alternate() {
-        let state = PaneState::parse(b"%3 0 0 10 1 1 0 2 8").unwrap();
+        let state = PaneState::parse(b"%3 0 0 10 1 1 0 2 8 0 0 1 1").unwrap();
         assert_eq!(
             build_snapshot(&[b"vim".to_vec()], &state),
-            "\x1b[?1049h\x1b[Hvim\x1b[0m\x1b[3;9r\x1b[1;1H"
+            "\x1b[?1049h\x1b[Hvim\x1b[0m\x1b[3;9r\x1b[1;1H\x1b[?1003h\x1b[?1006h"
         );
     }
 

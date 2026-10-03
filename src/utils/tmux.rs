@@ -116,6 +116,10 @@ impl TmuxClient for Tmux {
                 cwd,
                 "-e",
                 &env_var,
+                // Claude Code's fullscreen renderer keeps history in the app and redraws
+                // cleanly at any width, so viewers on different devices can resize freely
+                "-e",
+                "CLAUDE_CODE_NO_FLICKER=1",
                 &shell_cmd,
             ])
             .output()

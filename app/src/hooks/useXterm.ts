@@ -19,6 +19,7 @@ interface UseXtermReturn {
   focus: () => void;
   blur: () => void;
   scrollLines: (n: number) => void;
+  isMouseTracking: () => boolean;
   getTextContent: () => { text: string; viewportLine: number };
   dimensions: { cols: number; rows: number } | null;
 }
@@ -263,10 +264,27 @@ export function useXterm({
     terminalRef.current?.blur();
   }, []);
 
-  // Scroll by N lines (positive = down, negative = up)
-  const scrollLines = useCallback((n: number) => {
-    terminalRef.current?.scrollLines(n);
+  // Whether the app asked for mouse reporting (e.g. Claude Code's fullscreen
+  // renderer). Its history lives in the app, not xterm's scrollback.
+  const isMouseTracking = useCallback(() => {
+    return (terminalRef.current?.modes.mouseTrackingMode ?? 'none') !== 'none';
   }, []);
+
+  // Scroll by N lines (positive = down, negative = up). When the app tracks the
+  // mouse, send it wheel events instead (SGR encoding) so the app scrolls itself.
+  const scrollLines = useCallback((n: number) => {
+    const terminal = terminalRef.current;
+    if (!terminal || n === 0) return;
+    if (isMouseTracking()) {
+      const button = n < 0 ? 64 : 65;
+      const col = Math.max(1, Math.floor(terminal.cols / 2));
+      const row = Math.max(1, Math.floor(terminal.rows / 2));
+      const wheel = `\x1b[<${button};${col};${row}M`;
+      onInputRef.current(wheel.repeat(Math.abs(n)));
+      return;
+    }
+    terminal.scrollLines(n);
+  }, [isMouseTracking]);
 
   // Get all terminal text content by reading the buffer directly (no side effects)
   const getTextContent = useCallback((): { text: string; viewportLine: number } => {
@@ -290,6 +308,7 @@ export function useXterm({
     focus,
     blur,
     scrollLines,
+    isMouseTracking,
     getTextContent,
     dimensions,
   };
