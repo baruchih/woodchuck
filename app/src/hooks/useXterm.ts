@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { CanvasAddon } from '@xterm/addon-canvas';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { decodeOsc52 } from '../utils/osc52';
 
 // ── Interface ──
 
@@ -10,6 +11,8 @@ interface UseXtermParams {
   fontSize: number;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
+  /** Called with copied text when the browser refused a clipboard write (needs a user gesture) */
+  onCopyBlocked?: (text: string) => void;
 }
 
 interface UseXtermReturn {
@@ -86,12 +89,15 @@ export function useXterm({
   fontSize,
   onInput,
   onResize,
+  onCopyBlocked,
 }: UseXtermParams): UseXtermReturn {
   const containerRef = useRef<HTMLDivElement>(null!);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const onInputRef = useRef(onInput);
   onInputRef.current = onInput;
+  const onCopyBlockedRef = useRef(onCopyBlocked);
+  onCopyBlockedRef.current = onCopyBlocked;
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number } | null>(null);
 
   // Initialize terminal
@@ -127,6 +133,21 @@ export function useXterm({
     terminal.loadAddon(webLinksAddon);
 
     suppressQueryReplies(terminal);
+
+    // OSC 52: programs in the session (e.g. Claude Code's copy-on-select) put text
+    // on the clipboard. The app runs on the server, so its own clipboard isn't the
+    // viewer's — write it to the browser's clipboard instead.
+    terminal.parser.registerOscHandler(52, (data) => {
+      const text = decodeOsc52(data);
+      if (!text) return true;
+      if (!navigator.clipboard) {
+        // Insecure context (plain http on a non-localhost address)
+        onCopyBlockedRef.current?.(text);
+      } else {
+        navigator.clipboard.writeText(text).catch(() => onCopyBlockedRef.current?.(text));
+      }
+      return true;
+    });
 
     // Store refs
     terminalRef.current = terminal;

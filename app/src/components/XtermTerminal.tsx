@@ -31,10 +31,13 @@ export function XtermTerminal({
   className = '',
 }: XtermTerminalProps) {
   const { onTerminal } = useWS();
+  // Text a program copied that the browser wouldn't let us write without a tap
+  const [blockedCopy, setBlockedCopy] = useState<string | null>(null);
   const { containerRef, writeData, focus, scrollLines, isMouseTracking, getTextContent, dimensions } = useXterm({
     fontSize,
     onInput,
     onResize,
+    onCopyBlocked: setBlockedCopy,
   });
 
   // ── Selectable text overlay (long-press to activate) ──
@@ -277,6 +280,21 @@ export function XtermTerminal({
         onClick={handleClick}
         data-dimensions={dimensions ? `${dimensions.cols}x${dimensions.rows}` : ''}
       />
+
+      {/* Clipboard write needs a user gesture on some browsers (Safari/iOS) */}
+      {blockedCopy !== null && (
+        <button
+          type="button"
+          className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded border border-primary bg-surface text-xs font-medium text-primary shadow"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigator.clipboard?.writeText(blockedCopy).catch(() => {});
+            setBlockedCopy(null);
+          }}
+        >
+          Tap to copy selection
+        </button>
+      )}
 
       {/* Selectable text overlay — triggered by long-press */}
       {selectMode && (
