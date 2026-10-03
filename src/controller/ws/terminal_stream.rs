@@ -289,8 +289,12 @@ impl PaneState {
 /// so with a matching terminal size they land exactly where tmux has them.
 fn build_snapshot(capture: &[Vec<u8>], state: &PaneState) -> String {
     let mut s = String::new();
+    let mut capture = capture;
     if state.alternate_on {
         s.push_str("\x1b[?1049h\x1b[H");
+        // The alternate screen has no scrollback: send only the visible screen
+        // (the capture ends with it), not the normal screen's history
+        capture = &capture[capture.len().saturating_sub(state.height as usize)..];
     }
     let lines: Vec<String> = capture.iter().map(|l| String::from_utf8_lossy(l).into_owned()).collect();
     s.push_str(&lines.join("\r\n"));
@@ -502,6 +506,16 @@ mod tests {
             build_snapshot(&[b"vim".to_vec()], &state),
             "\x1b[?1049h\x1b[Hvim\x1b[0m\x1b[3;9r\x1b[1;1H\x1b[?1003h\x1b[?1006h"
         );
+    }
+
+    #[test]
+    fn test_build_snapshot_alternate_screen_skips_history() {
+        // height 2: only the last two capture lines are the alternate screen
+        let state = PaneState::parse(b"%3 0 1 2 1 1 0 0 1 0 0 1 1").unwrap();
+        let capture = vec![b"old history".to_vec(), b"more history".to_vec(), b"app row 1".to_vec(), b"app row 2".to_vec()];
+        let snap = build_snapshot(&capture, &state);
+        assert!(snap.starts_with("\x1b[?1049h\x1b[Happ row 1\r\napp row 2"), "{snap:?}");
+        assert!(!snap.contains("history"));
     }
 
     #[test]
