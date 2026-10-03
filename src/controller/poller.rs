@@ -19,28 +19,59 @@ use super::ws::messages::ServerMessage;
 use crate::model::{OutputChange, SessionStatus, SharedSessionStates};
 use crate::utils::{NtfyClient, SessionStore, TmuxClient, WebPushClient};
 
+/// One subscribed WebSocket connection
+pub struct Subscriber {
+    pub tx: mpsc::Sender<ServerMessage>,
+    /// Receives the poller's screen snapshots (`Output`). Terminal views get the
+    /// live terminal stream instead and only need status updates.
+    pub wants_output: bool,
+}
+
 /// Subscriber info for a session
 #[derive(Default)]
 pub struct SessionSubscribers {
     /// Channels to send messages to subscribers
-    pub senders: Vec<mpsc::Sender<ServerMessage>>,
+    pub senders: Vec<Subscriber>,
 }
 
 impl SessionSubscribers {
-    /// Add a new subscriber
+    /// Add a new subscriber that receives snapshots
     pub fn add(&mut self, tx: mpsc::Sender<ServerMessage>) {
-        self.senders.push(tx);
+        self.add_with(tx, true);
+    }
+
+    /// Add a subscriber, replacing any existing subscription from the same connection
+    pub fn add_with(&mut self, tx: mpsc::Sender<ServerMessage>, wants_output: bool) {
+        self.remove_channel(&tx);
+        self.senders.push(Subscriber { tx, wants_output });
+    }
+
+    /// Remove one connection's subscription (and any closed channels)
+    pub fn remove_channel(&mut self, tx: &mpsc::Sender<ServerMessage>) {
+        self.senders.retain(|s| !s.tx.same_channel(tx) && !s.tx.is_closed());
     }
 
     /// Remove closed channels
     pub fn cleanup(&mut self) {
-        self.senders.retain(|tx| !tx.is_closed());
+        self.senders.retain(|s| !s.tx.is_closed());
     }
 
     /// Broadcast message to all subscribers (drops messages for slow clients)
     pub fn broadcast(&mut self, msg: ServerMessage) {
-        self.senders.retain(|tx| {
-            match tx.try_send(msg.clone()) {
+        self.send_where(msg, |_| true);
+    }
+
+    /// Broadcast a screen snapshot to the subscribers that want one
+    pub fn broadcast_output(&mut self, msg: ServerMessage) {
+        self.send_where(msg, |s| s.wants_output);
+    }
+
+    fn send_where(&mut self, msg: ServerMessage, include: impl Fn(&Subscriber) -> bool) {
+        self.senders.retain(|s| {
+            if !include(s) {
+                return !s.tx.is_closed();
+            }
+            match s.tx.try_send(msg.clone()) {
                 Ok(()) => true,
                 Err(mpsc::error::TrySendError::Closed(_)) => false, // Remove dead sender
                 Err(mpsc::error::TrySendError::Full(_)) => {
@@ -76,13 +107,14 @@ pub async fn add_subscriber(
     session_states: &SharedSessionStates,
     session_id: &str,
     tx: mpsc::Sender<ServerMessage>,
+    wants_output: bool,
 ) {
     // Add to subscriber map
     {
         let mut subs = subscribers.write().await;
         subs.entry(session_id.to_string())
             .or_default()
-            .add(tx);
+            .add_with(tx, wants_output);
     }
 
     // Update subscriber count in session state
@@ -97,17 +129,18 @@ pub async fn add_subscriber(
     }
 }
 
-/// Remove a subscriber (called when WebSocket closes)
+/// Remove a connection's subscription (on unsubscribe or when the WebSocket closes)
 pub async fn remove_subscriber(
     subscribers: &SubscriberMap,
     session_states: &SharedSessionStates,
     session_id: &str,
+    tx: &mpsc::Sender<ServerMessage>,
 ) {
-    // Cleanup closed channels
+    // Remove this connection's channel (an open one too: unsubscribe while connected)
     {
         let mut subs = subscribers.write().await;
         if let Some(session_subs) = subs.get_mut(session_id) {
-            session_subs.cleanup();
+            session_subs.remove_channel(tx);
         }
     }
 
@@ -251,7 +284,7 @@ async fn poll_session(
             let mut subs = subscribers.write().await;
             if let Some(session_subs) = subs.get_mut(session_id) {
                 // Broadcast full output (not diff) - works better for TUI apps like Claude Code
-                session_subs.broadcast(ServerMessage::Output {
+                session_subs.broadcast_output(ServerMessage::Output {
                     session_id: session_id.to_string(),
                     content: output.clone(),
                     timestamp: timestamp.clone(),
@@ -623,7 +656,7 @@ mod tests {
         }
 
         let (tx, _rx) = mpsc::channel(16);
-        add_subscriber(&subscribers, &session_states, "s1", tx).await;
+        add_subscriber(&subscribers, &session_states, "s1", tx, true).await;
 
         let states = session_states.read().await;
         assert_eq!(states.get("s1").unwrap().subscriber_count, 1);
@@ -640,14 +673,57 @@ mod tests {
         }
 
         let (tx, rx) = mpsc::channel(16);
-        add_subscriber(&subscribers, &session_states, "s1", tx).await;
+        add_subscriber(&subscribers, &session_states, "s1", tx.clone(), true).await;
 
         // Drop receiver to simulate disconnect
         drop(rx);
-        remove_subscriber(&subscribers, &session_states, "s1").await;
+        remove_subscriber(&subscribers, &session_states, "s1", &tx).await;
 
         let states = session_states.read().await;
         assert_eq!(states.get("s1").unwrap().subscriber_count, 0);
+    }
+
+    #[test]
+    fn test_broadcast_output_skips_terminal_subscribers() {
+        let mut subs = SessionSubscribers::default();
+        let (preview_tx, mut preview_rx) = mpsc::channel(16);
+        let (terminal_tx, mut terminal_rx) = mpsc::channel(16);
+        subs.add_with(preview_tx, true);
+        subs.add_with(terminal_tx, false);
+
+        subs.broadcast_output(make_test_msg("s1"));
+        assert!(preview_rx.try_recv().is_ok());
+        assert!(terminal_rx.try_recv().is_err());
+
+        // Status and other messages still reach everyone
+        subs.broadcast(make_test_msg("s1"));
+        assert!(preview_rx.try_recv().is_ok());
+        assert!(terminal_rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn test_remove_channel_unsubscribes_open_connection() {
+        let mut subs = SessionSubscribers::default();
+        let (tx1, _rx1) = mpsc::channel(16);
+        let (tx2, _rx2) = mpsc::channel(16);
+        subs.add(tx1.clone());
+        subs.add(tx2);
+
+        // Still connected, but unsubscribed from this session
+        subs.remove_channel(&tx1);
+        assert_eq!(subs.count(), 1);
+    }
+
+    #[test]
+    fn test_add_with_replaces_same_connection() {
+        let mut subs = SessionSubscribers::default();
+        let (tx, mut rx) = mpsc::channel(16);
+        subs.add_with(tx.clone(), true);
+        subs.add_with(tx, false);
+        assert_eq!(subs.count(), 1);
+
+        subs.broadcast_output(make_test_msg("s1"));
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]

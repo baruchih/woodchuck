@@ -23,7 +23,7 @@ interface SessionPaneProps {
 export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove }: SessionPaneProps) {
   const { sendInput, uploadFiles, getSession, deleteSession, renameSession, moveToProject } = useSessions();
   const { resize, sendRawInput } = useWS();
-  const { content, needsAttention, triggerFastPoll, notifySentText, forceRefresh } = useSessionOutput({ sessionId });
+  const { needsAttention, triggerFastPoll, notifySentText, forceRefresh, onScreenChange } = useSessionOutput({ sessionId });
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
@@ -201,6 +201,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
           fontSize={fontSize}
           onInput={handleTerminalInput}
           onResize={handleResize}
+          onScreenChange={onScreenChange}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
           disableKeyboard={!focused}
@@ -293,7 +294,6 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       {showInfoSheet && (
         <SessionInfoSheet
           session={infoSession}
-          content={content}
           onClose={() => setShowInfoSheet(false)}
           onDelete={(id) => { deleteSession(id); onRemove(); }}
           onRename={renameSession}

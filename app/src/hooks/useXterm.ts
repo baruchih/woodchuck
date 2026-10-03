@@ -14,6 +14,8 @@ interface UseXtermParams {
   onResize: (cols: number, rows: number) => void;
   /** Called with copied text when the browser refused a clipboard write (needs a user gesture) */
   onCopyBlocked?: (text: string) => void;
+  /** Called with the visible screen text once output settles, when it changed */
+  onScreenChange?: (text: string) => void;
 }
 
 interface UseXtermReturn {
@@ -91,6 +93,7 @@ export function useXterm({
   onInput,
   onResize,
   onCopyBlocked,
+  onScreenChange,
 }: UseXtermParams): UseXtermReturn {
   const containerRef = useRef<HTMLDivElement>(null!);
   const terminalRef = useRef<Terminal | null>(null);
@@ -101,6 +104,8 @@ export function useXterm({
   onCopyBlockedRef.current = onCopyBlocked;
   const onResizeRef = useRef(onResize);
   onResizeRef.current = onResize;
+  const onScreenChangeRef = useRef(onScreenChange);
+  onScreenChangeRef.current = onScreenChange;
   // Every session resize makes the app redraw: send one per settled layout change
   const resizeSchedulerRef = useRef<ReturnType<typeof createResizeScheduler> | null>(null);
   if (!resizeSchedulerRef.current) {
@@ -187,6 +192,28 @@ export function useXterm({
     };
     requestAnimationFrame(tryFit);
 
+    // Report the visible screen once output settles (quick-reply detection etc.).
+    // Read from the bottom of the buffer, not the viewport, so scrolling up
+    // doesn't change what counts as the current screen.
+    let screenTimer = 0;
+    let lastScreen = '';
+    const writeParsedDisposable = terminal.onWriteParsed(() => {
+      if (!onScreenChangeRef.current) return;
+      clearTimeout(screenTimer);
+      screenTimer = window.setTimeout(() => {
+        const buffer = terminal.buffer.active;
+        const lines: string[] = [];
+        for (let y = buffer.baseY; y < buffer.baseY + terminal.rows; y++) {
+          lines.push(buffer.getLine(y)?.translateToString(true) ?? '');
+        }
+        const text = lines.join('\n').replace(/\n+$/, '');
+        if (text !== lastScreen) {
+          lastScreen = text;
+          onScreenChangeRef.current?.(text);
+        }
+      }, 150);
+    });
+
     // Handle keyboard input (desktop only — mobile uses a separate input bar)
     const inputDisposable = terminal.onData((data) => {
       if (FOCUS_REPORTS.has(data)) return;
@@ -196,6 +223,8 @@ export function useXterm({
     // Cleanup
     return () => {
       inputDisposable.dispose();
+      writeParsedDisposable.dispose();
+      clearTimeout(screenTimer);
       resizeSchedulerRef.current?.dispose();
       terminal.dispose();
       terminalRef.current = null;

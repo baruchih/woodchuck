@@ -11,7 +11,7 @@ use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use super::messages::{ClientMessage, ServerMessage};
+use super::messages::{ClientMessage, ServerMessage, SubscribeMode};
 use super::terminal_stream;
 use crate::config::Config;
 use crate::controller::poller::{add_subscriber, remove_subscriber, SubscriberMap};
@@ -123,7 +123,7 @@ pub async fn handle_connection(
 
         // Extract session_id for validation (only for message types that have one)
         let session_id_opt = match &client_msg {
-            ClientMessage::Subscribe { session_id }
+            ClientMessage::Subscribe { session_id, .. }
             | ClientMessage::Unsubscribe { session_id }
             | ClientMessage::Input { session_id, .. }
             | ClientMessage::Resize { session_id, .. }
@@ -147,9 +147,14 @@ pub async fn handle_connection(
 
         // Handle message
         match client_msg {
-            ClientMessage::Subscribe { session_id } => {
+            ClientMessage::Subscribe { session_id, mode } => {
+                // Terminal views render the live stream, previews render snapshots,
+                // status subscribers need neither. Older clients send no mode and get both.
+                let wants_output = matches!(mode, None | Some(SubscribeMode::Preview));
+                let wants_stream = matches!(mode, None | Some(SubscribeMode::Terminal));
                 handle_subscribe(
                     &session_id,
+                    wants_output,
                     &tx,
                     &tmux,
                     &session_states,
@@ -157,18 +162,19 @@ pub async fn handle_connection(
                     &subscriptions,
                 )
                 .await;
-                if subscriptions.read().await.contains(&session_id) {
+                if let Some(old) = terminal_streams.remove(&session_id) {
+                    old.abort();
+                }
+                if wants_stream && subscriptions.read().await.contains(&session_id) {
                     let stream = tokio::spawn(terminal_stream::run(session_id.clone(), tx.clone()));
-                    if let Some(old) = terminal_streams.insert(session_id, stream) {
-                        old.abort();
-                    }
+                    terminal_streams.insert(session_id, stream);
                 }
             }
             ClientMessage::Unsubscribe { session_id } => {
                 if let Some(stream) = terminal_streams.remove(&session_id) {
                     stream.abort();
                 }
-                handle_unsubscribe(&session_id, &subscriptions, &session_states, &subscribers).await;
+                handle_unsubscribe(&session_id, &tx, &subscriptions, &session_states, &subscribers).await;
                 let _ = tx.try_send(ServerMessage::Unsubscribed { session_id });
             }
             ClientMessage::Input { session_id, text, raw } => {
@@ -221,7 +227,7 @@ pub async fn handle_connection(
     {
         let subs = subscriptions.read().await;
         for session_id in subs.iter() {
-            remove_subscriber(&subscribers, &session_states, session_id).await;
+            remove_subscriber(&subscribers, &session_states, session_id, &tx).await;
         }
     }
 
@@ -239,6 +245,7 @@ pub async fn handle_connection(
 /// Handle subscribe message
 async fn handle_subscribe(
     session_id: &str,
+    wants_output: bool,
     tx: &mpsc::Sender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
     session_states: &SharedSessionStates,
@@ -290,12 +297,13 @@ async fn handle_subscribe(
     }
 
     // Add subscriber to global subscriber map
-    add_subscriber(subscribers, session_states, session_id, tx.clone()).await;
+    add_subscriber(subscribers, session_states, session_id, tx.clone(), wants_output).await;
 
-    // Send subscription confirmation with current state
+    // Send subscription confirmation with current state. Terminal views get the
+    // screen from the terminal stream, so they don't need the snapshot.
     let _ = tx.try_send(ServerMessage::Subscribed {
         session_id: session_id.to_string(),
-        current_output,
+        current_output: if wants_output { current_output } else { String::new() },
         status: status.to_string(),
     });
 
@@ -305,6 +313,7 @@ async fn handle_subscribe(
 /// Handle unsubscribe message
 async fn handle_unsubscribe(
     session_id: &str,
+    tx: &mpsc::Sender<ServerMessage>,
     local_subscriptions: &Arc<tokio::sync::RwLock<HashSet<String>>>,
     session_states: &SharedSessionStates,
     subscribers: &SubscriberMap,
@@ -315,8 +324,8 @@ async fn handle_unsubscribe(
         subs.remove(session_id);
     }
 
-    // Remove from global subscribers
-    remove_subscriber(subscribers, session_states, session_id).await;
+    // Remove this connection from the session's subscribers
+    remove_subscriber(subscribers, session_states, session_id, tx).await;
 
     info!(session = %session_id, "Client unsubscribed");
 }

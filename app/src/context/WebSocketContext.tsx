@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback, ty
 import type {
   ServerMessage, OutputMessage, TerminalMessage, StatusMessage, ErrorMessage, ClientMessage,
   SubscribedMessage, SessionsMessage, SessionCreatedMessage, SessionDeletedMessage,
-  SessionUpdatedMessage, SessionEndedMessage,
+  SessionUpdatedMessage, SessionEndedMessage, SubscribeMode,
 } from '../types';
 
 type PendingRequest = {
@@ -14,7 +14,7 @@ type PendingRequest = {
 interface WebSocketContextValue {
   connected: boolean;
   forceReconnect: () => void;
-  subscribe: (sessionId: string) => void;
+  subscribe: (sessionId: string, mode: SubscribeMode) => void;
   unsubscribe: (sessionId: string) => void;
   sendInput: (sessionId: string, text: string) => void;
   sendRawInput: (sessionId: string, data: string) => void;
@@ -49,7 +49,8 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number>();
-  const subscriptionsRef = useRef<Set<string>>(new Set());
+  // Session ID -> mode, so reconnects resubscribe the same way
+  const subscriptionsRef = useRef<Map<string, SubscribeMode>>(new Map());
 
   const outputListenersRef = useRef<Set<(msg: OutputMessage) => void>>(new Set());
   const terminalListenersRef = useRef<Set<(msg: TerminalMessage) => void>>(new Set());
@@ -82,8 +83,8 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   }, []);
 
   const resubscribeAll = useCallback(() => {
-    subscriptionsRef.current.forEach((sessionId) => {
-      send({ type: 'subscribe', session_id: sessionId });
+    subscriptionsRef.current.forEach((mode, sessionId) => {
+      send({ type: 'subscribe', session_id: sessionId, mode });
     });
   }, [send]);
 
@@ -249,9 +250,9 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [connect]);
 
-  const subscribe = useCallback((sessionId: string) => {
-    subscriptionsRef.current.add(sessionId);
-    send({ type: 'subscribe', session_id: sessionId });
+  const subscribe = useCallback((sessionId: string, mode: SubscribeMode) => {
+    subscriptionsRef.current.set(sessionId, mode);
+    send({ type: 'subscribe', session_id: sessionId, mode });
   }, [send]);
 
   const unsubscribe = useCallback((sessionId: string) => {

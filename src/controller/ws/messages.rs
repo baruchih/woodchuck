@@ -13,7 +13,12 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     /// Subscribe to session output
-    Subscribe { session_id: String },
+    Subscribe {
+        session_id: String,
+        /// What the client renders. None (older clients) gets both.
+        #[serde(default)]
+        mode: Option<SubscribeMode>,
+    },
 
     /// Unsubscribe from session output
     Unsubscribe { session_id: String },
@@ -78,6 +83,18 @@ pub enum ClientMessage {
         #[serde(default)]
         request_id: Option<String>,
     },
+}
+
+/// What a subscriber renders, which decides what it is sent
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscribeMode {
+    /// A terminal view: the live terminal stream, no screen snapshots
+    Terminal,
+    /// A small preview (e.g. a grid card): screen snapshots, no terminal stream
+    Preview,
+    /// Status updates only (e.g. a session list)
+    Status,
 }
 
 // =============================================================================
@@ -192,7 +209,29 @@ mod tests {
         let json = r#"{"type": "subscribe", "session_id": "test"}"#;
         let msg: ClientMessage = serde_json::from_str(json).unwrap();
         match msg {
-            ClientMessage::Subscribe { session_id } => assert_eq!(session_id, "test"),
+            ClientMessage::Subscribe { session_id, mode } => {
+                assert_eq!(session_id, "test");
+                assert_eq!(mode, None);
+            }
+            _ => panic!("Expected Subscribe message"),
+        }
+    }
+
+    #[test]
+    fn test_client_message_deserialize_subscribe_mode() {
+        let json = r#"{"type": "subscribe", "session_id": "t", "mode": "terminal"}"#;
+        match serde_json::from_str(json).unwrap() {
+            ClientMessage::Subscribe { mode, .. } => assert_eq!(mode, Some(SubscribeMode::Terminal)),
+            _ => panic!("Expected Subscribe message"),
+        }
+        let json = r#"{"type": "subscribe", "session_id": "t", "mode": "preview"}"#;
+        match serde_json::from_str(json).unwrap() {
+            ClientMessage::Subscribe { mode, .. } => assert_eq!(mode, Some(SubscribeMode::Preview)),
+            _ => panic!("Expected Subscribe message"),
+        }
+        let json = r#"{"type": "subscribe", "session_id": "t", "mode": "status"}"#;
+        match serde_json::from_str(json).unwrap() {
+            ClientMessage::Subscribe { mode, .. } => assert_eq!(mode, Some(SubscribeMode::Status)),
             _ => panic!("Expected Subscribe message"),
         }
     }

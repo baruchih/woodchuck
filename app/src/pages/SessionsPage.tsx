@@ -197,14 +197,21 @@ export function SessionsPage() {
   // Derive a stable string of session IDs to avoid re-running on status-only changes
   const sessionIds = sessions.map((s) => s.id).join(',');
 
+  // Grid cards preview each session's screen; the list only needs status
+  const subscribeMode = viewMode === 'grid' ? 'preview' : 'status';
+  const subscribedModeRef = useRef(subscribeMode);
+
   // Subscribe to all session IDs for real-time status updates (diff-based)
   useEffect(() => {
     const currentIds = new Set(sessionIds.split(',').filter(Boolean));
+    // Switching between list and grid changes what every subscription needs
+    const modeChanged = subscribedModeRef.current !== subscribeMode;
+    subscribedModeRef.current = subscribeMode;
 
-    // Subscribe to new sessions
+    // Subscribe to new sessions (or all of them again with the new mode)
     for (const id of currentIds) {
-      if (!subscribedIdsRef.current.has(id)) {
-        subscribe(id);
+      if (modeChanged || !subscribedIdsRef.current.has(id)) {
+        subscribe(id, subscribeMode);
       }
     }
 
@@ -216,7 +223,7 @@ export function SessionsPage() {
     }
 
     subscribedIdsRef.current = currentIds;
-  }, [sessionIds, subscribe, unsubscribe]);
+  }, [sessionIds, subscribeMode, subscribe, unsubscribe]);
 
   // Cleanup all subscriptions on unmount only
   useEffect(() => {

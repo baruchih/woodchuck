@@ -11,6 +11,8 @@ export interface XtermTerminalProps {
   fontSize: number;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
+  /** Receives the visible screen text after it changes */
+  onScreenChange?: (text: string) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   /** When true, tapping the terminal won't open the keyboard (mobile input bar handles input) */
@@ -25,6 +27,7 @@ export function XtermTerminal({
   fontSize,
   onInput,
   onResize,
+  onScreenChange,
   onZoomIn,
   onZoomOut,
   disableKeyboard = false,
@@ -38,6 +41,7 @@ export function XtermTerminal({
     onInput,
     onResize,
     onCopyBlocked: setBlockedCopy,
+    onScreenChange,
   });
 
   // ── Selectable text overlay (long-press to activate) ──

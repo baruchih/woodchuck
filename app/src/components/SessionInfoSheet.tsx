@@ -7,6 +7,7 @@ import type { Session, Project } from '../types';
 interface SessionInfoSheetProps {
   session: Session | null;
   projects?: Project[];
+  /** Output to export/copy. When omitted, the sheet fetches the session's output itself. */
   content?: string;
   onClose: () => void;
   onDelete: (sessionId: string) => void;
@@ -49,7 +50,7 @@ function formatDuration(startDateString: string): string {
 export function SessionInfoSheet({
   session,
   projects = [],
-  content,
+  content: contentProp,
   onClose,
   onDelete,
   onRestart,
@@ -57,6 +58,19 @@ export function SessionInfoSheet({
   onMoveToProject,
   onUpdateTags,
 }: SessionInfoSheetProps) {
+  // Output for export/copy, fetched on open (terminal views don't keep snapshots)
+  const [fetchedContent, setFetchedContent] = useState('');
+  const content = contentProp ?? fetchedContent;
+  const sessionId = session?.id;
+  useEffect(() => {
+    if (contentProp !== undefined || !sessionId) return;
+    let cancelled = false;
+    api.poll(sessionId)
+      .then((data) => { if (!cancelled) setFetchedContent(data.content); })
+      .catch(() => { /* export buttons stay hidden */ });
+    return () => { cancelled = true; };
+  }, [contentProp, sessionId]);
+
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [showProjectMenu, setShowProjectMenu] = useState(false);

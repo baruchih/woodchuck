@@ -9,6 +9,7 @@ interface UseSessionOutputParams {
 }
 
 interface UseSessionOutputReturn {
+  /** The session's visible screen text, as rendered by the terminal */
   content: string;
   needsAttention: boolean;
   contextActions: ContextAction[];
@@ -16,16 +17,19 @@ interface UseSessionOutputReturn {
   triggerFastPoll: () => void;
   notifySentText: (text: string) => void;
   forceRefresh: () => void;
+  /** Pass to XtermTerminal: receives the screen text after it changes */
+  onScreenChange: (text: string) => void;
 }
 
 const ENTER_RETRY_DELAY_MS = 2000;
 
 /**
- * WebSocket-based terminal output hook. Replaces useTerminal's HTTP polling
- * with WebSocket subscribe/output messages for lower latency.
+ * Subscribes a terminal view to a session. The terminal renders the live stream
+ * itself; this hook tracks status and reads the rendered screen (via
+ * onScreenChange) for quick-reply actions and the stuck-Enter retry.
  */
 export function useSessionOutput({ sessionId }: UseSessionOutputParams): UseSessionOutputReturn {
-  const { subscribe, unsubscribe, onOutput, onStatus, onSubscribed } = useWS();
+  const { subscribe, unsubscribe, onStatus, onSubscribed } = useWS();
   const [content, setContent] = useState('');
   const [needsAttention, setNeedsAttention] = useState(false);
   const [contextActions, setContextActions] = useState<ContextAction[]>([]);
@@ -41,7 +45,7 @@ export function useSessionOutput({ sessionId }: UseSessionOutputParams): UseSess
   useEffect(() => {
     if (!sessionId) return;
 
-    subscribe(sessionId);
+    subscribe(sessionId, 'terminal');
 
     return () => {
       unsubscribe(sessionId);
@@ -52,36 +56,29 @@ export function useSessionOutput({ sessionId }: UseSessionOutputParams): UseSess
     };
   }, [sessionId, subscribe, unsubscribe]);
 
-  // Handle initial subscription response (full output + status)
+  // Handle initial subscription response (status; the screen comes from the stream)
   useEffect(() => {
     const unsub = onSubscribed((msg) => {
       if (msg.session_id !== sessionIdRef.current) return;
-      contentRef.current = msg.current_output;
-      setContent(msg.current_output);
-      setContextActions(detectContextActions(msg.current_output));
       setStatus(msg.status);
       setNeedsAttention(msg.status === 'needs_input');
     });
     return unsub;
   }, [onSubscribed]);
 
-  // Handle streaming output updates (full content from poller)
-  useEffect(() => {
-    const unsub = onOutput((msg) => {
-      if (msg.session_id !== sessionIdRef.current) return;
-      contentRef.current = msg.content;
-      setContent(msg.content);
-      setContextActions(detectContextActions(msg.content));
+  // The terminal's rendered screen changed
+  const onScreenChange = useCallback((text: string) => {
+    contentRef.current = text;
+    setContent(text);
+    setContextActions(detectContextActions(text));
 
-      // Content changed: clear enter retry
-      if (enterRetryTimerRef.current) {
-        clearTimeout(enterRetryTimerRef.current);
-        enterRetryTimerRef.current = null;
-        sentTextRef.current = null;
-      }
-    });
-    return unsub;
-  }, [onOutput]);
+    // Content changed: clear enter retry
+    if (enterRetryTimerRef.current) {
+      clearTimeout(enterRetryTimerRef.current);
+      enterRetryTimerRef.current = null;
+      sentTextRef.current = null;
+    }
+  }, []);
 
   // Handle status updates
   useEffect(() => {
@@ -133,9 +130,9 @@ export function useSessionOutput({ sessionId }: UseSessionOutputParams): UseSess
     contentRef.current = '';
     // Small delay to let unsubscribe process, then resubscribe
     setTimeout(() => {
-      subscribe(sessionIdRef.current);
+      subscribe(sessionIdRef.current, 'terminal');
     }, 100);
   }, [subscribe, unsubscribe]);
 
-  return { content, needsAttention, contextActions, status, triggerFastPoll, notifySentText, forceRefresh };
+  return { content, needsAttention, contextActions, status, triggerFastPoll, notifySentText, forceRefresh, onScreenChange };
 }

@@ -64,7 +64,7 @@ export function SessionPage() {
 
 
   // WebSocket-based terminal output (replaces HTTP polling)
-  const { content, needsAttention, contextActions, triggerFastPoll, notifySentText, forceRefresh } = useSessionOutput({
+  const { needsAttention, contextActions, triggerFastPoll, notifySentText, forceRefresh, onScreenChange } = useSessionOutput({
     sessionId: decodedId,
   });
 
@@ -454,6 +454,7 @@ export function SessionPage() {
               fontSize={fontSize}
               onInput={handleTerminalInput}
               onResize={handleTerminalResize}
+              onScreenChange={onScreenChange}
               onZoomIn={zoomIn}
               onZoomOut={zoomOut}
               disableKeyboard={isMobile}
@@ -596,7 +597,6 @@ export function SessionPage() {
         <SessionInfoSheet
           session={session}
           projects={projects}
-          content={content}
           onClose={handleCloseInfo}
           onDelete={handleDeleteFromInfo}
           onRestart={async (id) => { await restartSession(id); setTimeout(refreshCommands, 3000); }}

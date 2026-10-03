@@ -136,9 +136,14 @@ export type ServerMessage = OutputMessage | TerminalMessage | StatusMessage | Er
   | SessionDeletedMessage | SessionUpdatedMessage | AckMessage;
 
 // WebSocket messages - Client to Server
+/** What a subscriber renders: a terminal (live stream), a preview (screen
+ *  snapshots) or nothing (status only). Decides what the server sends. */
+export type SubscribeMode = 'terminal' | 'preview' | 'status';
+
 export interface SubscribeMessage {
   type: 'subscribe';
   session_id: string;
+  mode?: SubscribeMode;
 }
 
 export interface UnsubscribeMessage {
