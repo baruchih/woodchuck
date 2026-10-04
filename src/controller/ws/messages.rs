@@ -30,6 +30,10 @@ pub enum ClientMessage {
         /// When true, send text literally without appending Enter (for raw terminal keystroke passthrough)
         #[serde(default)]
         raw: bool,
+        /// When true, paste the text (bracketed if the app asked for it), without Enter.
+        /// Multi-line pastes stay one input, and image paths become attachments in Claude.
+        #[serde(default)]
+        paste: bool,
     },
 
     /// Resize a session's terminal
@@ -241,10 +245,11 @@ mod tests {
         let json = r#"{"type": "input", "session_id": "test", "text": "yes"}"#;
         let msg: ClientMessage = serde_json::from_str(json).unwrap();
         match msg {
-            ClientMessage::Input { session_id, text, raw } => {
+            ClientMessage::Input { session_id, text, raw, paste } => {
                 assert_eq!(session_id, "test");
                 assert_eq!(text, "yes");
                 assert!(!raw);
+                assert!(!paste);
             }
             _ => panic!("Expected Input message"),
         }

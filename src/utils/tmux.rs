@@ -33,6 +33,9 @@ pub trait TmuxClient: Send + Sync {
     /// Send raw terminal data to a session (literal passthrough, no auto-Enter)
     async fn send_keys_raw(&self, name: &str, data: &str) -> Result<(), ModelError>;
 
+    /// Paste text into a session, as a bracketed paste if the app asked for one (no Enter)
+    async fn paste(&self, name: &str, text: &str) -> Result<(), ModelError>;
+
     /// Resize a session's window
     async fn resize_window(&self, name: &str, cols: u16, rows: u16) -> Result<(), ModelError>;
 
@@ -278,6 +281,11 @@ impl TmuxClient for Tmux {
         }
 
         Ok(())
+    }
+
+    #[instrument(skip(self, text))]
+    async fn paste(&self, name: &str, text: &str) -> Result<(), ModelError> {
+        paste_text(name, text).await
     }
 
     #[instrument(skip(self))]
@@ -532,6 +540,16 @@ pub mod mock {
             let mut sessions = self.sessions.write().await;
             if let Some(session) = sessions.get_mut(name) {
                 session.last_keys.push(format!("raw:{}", data));
+                Ok(())
+            } else {
+                Err(ModelError::SessionNotFound(name.to_string()))
+            }
+        }
+
+        async fn paste(&self, name: &str, text: &str) -> Result<(), ModelError> {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(name) {
+                session.last_keys.push(format!("paste:{}", text));
                 Ok(())
             } else {
                 Err(ModelError::SessionNotFound(name.to_string()))

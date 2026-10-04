@@ -18,6 +18,7 @@ interface WebSocketContextValue {
   unsubscribe: (sessionId: string) => void;
   sendInput: (sessionId: string, text: string) => void;
   sendRawInput: (sessionId: string, data: string) => void;
+  pasteInput: (sessionId: string, text: string) => void;
   resize: (sessionId: string, cols: number, rows: number) => void;
   onOutput: (callback: (msg: OutputMessage) => void) => () => void;
   onTerminal: (callback: (msg: TerminalMessage) => void) => () => void;
@@ -268,6 +269,12 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     send({ type: 'input', session_id: sessionId, text: data, raw: true });
   }, [send]);
 
+  // Paste through tmux: one bracketed paste if the app asked for it, so multi-line
+  // text stays one input and pasted image paths become attachments in Claude
+  const pasteInput = useCallback((sessionId: string, text: string) => {
+    send({ type: 'input', session_id: sessionId, text, paste: true });
+  }, [send]);
+
   const resize = useCallback((sessionId: string, cols: number, rows: number) => {
     send({ type: 'resize', session_id: sessionId, cols, rows });
   }, [send]);
@@ -372,6 +379,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
     unsubscribe,
     sendInput,
     sendRawInput,
+    pasteInput,
     resize,
     onOutput,
     onTerminal,

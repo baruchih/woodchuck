@@ -177,7 +177,7 @@ pub async fn handle_connection(
                 handle_unsubscribe(&session_id, &tx, &subscriptions, &session_states, &subscribers).await;
                 let _ = tx.try_send(ServerMessage::Unsubscribed { session_id });
             }
-            ClientMessage::Input { session_id, text, raw } => {
+            ClientMessage::Input { session_id, text, raw, paste } => {
                 // Validate input length
                 if text.len() > MAX_WS_INPUT_LEN {
                     let _ = tx.try_send(ServerMessage::Error {
@@ -187,7 +187,7 @@ pub async fn handle_connection(
                     });
                     continue;
                 }
-                handle_input(&session_id, &text, raw, &tx, &tmux, &session_states, &session_store).await;
+                handle_input(&session_id, &text, raw, paste, &tx, &tmux, &session_states, &session_store).await;
             }
             ClientMessage::Resize {
                 session_id,
@@ -331,16 +331,27 @@ async fn handle_unsubscribe(
 }
 
 /// Handle input message
+#[allow(clippy::too_many_arguments)]
 async fn handle_input(
     session_id: &str,
     text: &str,
     raw: bool,
+    paste: bool,
     tx: &mpsc::Sender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
     session_states: &SharedSessionStates,
     session_store: &Arc<dyn SessionStore>,
 ) {
-    if raw {
+    if paste {
+        // Paste: one bracketed paste (if the app wants it), no Enter
+        if let Err(e) = tmux.paste(session_id, text).await {
+            let _ = tx.try_send(ServerMessage::Error {
+                session_id: session_id.to_string(),
+                message: format!("Failed to paste: {}", e),
+                request_id: None,
+            });
+        }
+    } else if raw {
         // Raw mode: send keys directly without auto-Enter (for xterm keystroke passthrough)
         match tmux.send_keys_raw(session_id, text).await {
             Ok(()) => {

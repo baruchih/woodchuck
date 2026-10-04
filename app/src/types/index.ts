@@ -156,6 +156,8 @@ export interface InputMessage {
   session_id: string;
   text: string;
   raw?: boolean;
+  /** Paste the text (bracketed if the app wants it), without Enter */
+  paste?: boolean;
 }
 
 export interface ResizeMessage {

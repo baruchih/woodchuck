@@ -16,6 +16,8 @@ interface UseXtermParams {
   onCopyBlocked?: (text: string) => void;
   /** Called with the visible screen text once output settles, when it changed */
   onScreenChange?: (text: string) => void;
+  /** Handles pastes (images and/or text) instead of xterm typing them in */
+  onPaste?: (paste: { images: File[]; text: string }) => void;
 }
 
 interface UseXtermReturn {
@@ -83,6 +85,18 @@ function suppressQueryReplies(terminal: Terminal) {
   }
 }
 
+/** Images on the clipboard, via the async Clipboard API (may prompt for permission) */
+async function readClipboardImages(): Promise<File[]> {
+  const files: File[] = [];
+  for (const item of await navigator.clipboard.read()) {
+    const type = item.types.find((t) => t.startsWith('image/'));
+    if (!type) continue;
+    const blob = await item.getType(type);
+    files.push(new File([blob], `pasted-image.${type.split('/')[1] || 'png'}`, { type }));
+  }
+  return files;
+}
+
 /** Focus in/out reports — tmux tracks focus itself */
 const FOCUS_REPORTS = new Set(['\x1b[I', '\x1b[O']);
 
@@ -94,6 +108,7 @@ export function useXterm({
   onResize,
   onCopyBlocked,
   onScreenChange,
+  onPaste,
 }: UseXtermParams): UseXtermReturn {
   const containerRef = useRef<HTMLDivElement>(null!);
   const terminalRef = useRef<Terminal | null>(null);
@@ -106,6 +121,8 @@ export function useXterm({
   onResizeRef.current = onResize;
   const onScreenChangeRef = useRef(onScreenChange);
   onScreenChangeRef.current = onScreenChange;
+  const onPasteRef = useRef(onPaste);
+  onPasteRef.current = onPaste;
   // Every session resize makes the app redraw: send one per settled layout change
   const resizeSchedulerRef = useRef<ReturnType<typeof createResizeScheduler> | null>(null);
   if (!resizeSchedulerRef.current) {
@@ -214,6 +231,35 @@ export function useXterm({
       }, 150);
     });
 
+    // Paste (Cmd+V, or Ctrl+V off macOS): hand images and text to onPaste instead
+    // of letting xterm type the text in, which turns newlines into Enter presses
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!onPasteRef.current || !e.clipboardData) return;
+      const images = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'));
+      const text = e.clipboardData.getData('text/plain');
+      if (images.length === 0 && !text) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onPasteRef.current({ images, text: images.length > 0 ? '' : text });
+    };
+    container.addEventListener('paste', handlePaste, true);
+
+    // Ctrl+V on macOS is Claude Code's image paste, which reads the clipboard of the
+    // machine Claude runs on — not this one. Read this machine's clipboard instead;
+    // with no image there, pass Ctrl+V through as before.
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+    terminal.attachCustomKeyEventHandler((ev) => {
+      const ctrlV = ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey && ev.code === 'KeyV';
+      if (!isMac || !ctrlV || !onPasteRef.current || !navigator.clipboard?.read) return true;
+      if (ev.type === 'keydown') {
+        ev.preventDefault();
+        readClipboardImages()
+          .then((images) => (images.length > 0 ? onPasteRef.current?.({ images, text: '' }) : onInputRef.current('\x16')))
+          .catch(() => onInputRef.current('\x16'));
+      }
+      return false;
+    });
+
     // Handle keyboard input (desktop only — mobile uses a separate input bar)
     const inputDisposable = terminal.onData((data) => {
       if (FOCUS_REPORTS.has(data)) return;
@@ -224,6 +270,7 @@ export function useXterm({
     return () => {
       inputDisposable.dispose();
       writeParsedDisposable.dispose();
+      container.removeEventListener('paste', handlePaste, true);
       clearTimeout(screenTimer);
       resizeSchedulerRef.current?.dispose();
       terminal.dispose();

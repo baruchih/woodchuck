@@ -2,6 +2,8 @@ import { useEffect, useCallback, useState, useRef } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { useXterm } from '../hooks/useXterm';
 import { useWS } from '../context/WebSocketContext';
+import { api } from '../api/client';
+import { INPUT_MAX_BYTES, inputBytes } from '../utils/inputLimit';
 
 // ── Interface ──
 
@@ -33,15 +35,46 @@ export function XtermTerminal({
   disableKeyboard = false,
   className = '',
 }: XtermTerminalProps) {
-  const { onTerminal } = useWS();
+  const { onTerminal, pasteInput } = useWS();
   // Text a program copied that the browser wouldn't let us write without a tap
   const [blockedCopy, setBlockedCopy] = useState<string | null>(null);
+  const [pasteStatus, setPasteStatus] = useState<{ text: string; error?: boolean } | null>(null);
+
+  // Pasted images are uploaded to the server and their paths pasted into the session:
+  // Claude Code turns a pasted image path into an attachment. Text goes in as one paste.
+  const handlePaste = useCallback(async ({ images, text }: { images: File[]; text: string }) => {
+    if (images.length === 0) {
+      if (inputBytes(text) > INPUT_MAX_BYTES) {
+        setPasteStatus({ text: 'Paste too long — upload it as a file instead', error: true });
+        return;
+      }
+      pasteInput(sessionId, text);
+      return;
+    }
+    setPasteStatus({ text: images.length === 1 ? 'Uploading image…' : `Uploading ${images.length} images…` });
+    try {
+      for (const image of images) {
+        const { path } = await api.uploadImage(sessionId, image);
+        pasteInput(sessionId, path);
+      }
+      setPasteStatus(null);
+    } catch {
+      setPasteStatus({ text: 'Image upload failed', error: true });
+    }
+  }, [sessionId, pasteInput]);
+
+  useEffect(() => {
+    if (!pasteStatus?.error) return;
+    const timer = setTimeout(() => setPasteStatus(null), 4000);
+    return () => clearTimeout(timer);
+  }, [pasteStatus]);
   const { containerRef, writeData, focus, scrollLines, isMouseTracking, getTextContent, dimensions } = useXterm({
     fontSize,
     onInput,
     onResize,
     onCopyBlocked: setBlockedCopy,
     onScreenChange,
+    onPaste: handlePaste,
   });
 
   // ── Selectable text overlay (long-press to activate) ──
@@ -284,6 +317,17 @@ export function XtermTerminal({
         onClick={handleClick}
         data-dimensions={dimensions ? `${dimensions.cols}x${dimensions.rows}` : ''}
       />
+
+      {pasteStatus && (
+        <div
+          className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded border bg-surface text-xs shadow ${
+            pasteStatus.error ? 'border-status-error text-status-error' : 'border-border text-text-muted'
+          }`}
+          role="status"
+        >
+          {pasteStatus.text}
+        </div>
+      )}
 
       {/* Clipboard write needs a user gesture on some browsers (Safari/iOS) */}
       {blockedCopy !== null && (
