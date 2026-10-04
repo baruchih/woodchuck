@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { marked } from 'marked';
 import { api } from '../api/client';
+import { buildPreviewHtml } from '../utils/htmlPreview';
 import type { FileEntry } from '../types';
 
 interface FileBrowserProps {
@@ -454,6 +455,13 @@ function isMarkdownFile(filename: string): boolean {
   return MARKDOWN_EXTENSIONS.has(ext);
 }
 
+const HTML_EXTENSIONS = new Set(['html', 'htm']);
+
+function isHtmlFile(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return HTML_EXTENSIONS.has(ext);
+}
+
 function FileViewer({
   sessionId,
   path,
@@ -469,10 +477,15 @@ function FileViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [showPreview, setShowPreview] = useState(() => isMarkdownFile(name));
+  const [showPreview, setShowPreview] = useState(() => isMarkdownFile(name) || isHtmlFile(name));
   const [fontSize, setFontSize] = useState(12);
   const [refreshKey, setRefreshKey] = useState(0);
   const isMd = isMarkdownFile(name);
+  const isHtml = isHtmlFile(name);
+  const htmlPreview = useMemo(
+    () => (isHtml && content != null ? buildPreviewHtml(content, path, sessionId) : ''),
+    [isHtml, content, path, sessionId],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -556,8 +569,8 @@ function FileViewer({
               className="px-1.5 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
               title="Increase font size"
             >A+</button>
-            {/* Markdown preview toggle */}
-            {isMd && (
+            {/* Markdown / HTML preview toggle */}
+            {(isMd || isHtml) && (
               <button
                 onClick={() => setShowPreview(p => !p)}
                 className={`flex items-center gap-1 px-2 py-1 rounded border text-[11px] font-medium transition-colors ${
@@ -627,7 +640,16 @@ function FileViewer({
         )}
 
         {!loading && !error && content != null && (
-          isMd && showPreview ? (
+          isHtml && showPreview ? (
+            // Sandboxed with no permissions: no scripts, forms, popups or navigation.
+            // A script here could otherwise call the (unauthenticated) API and drive sessions.
+            <iframe
+              title={name}
+              sandbox=""
+              srcDoc={htmlPreview}
+              className="block w-full h-full border-0 bg-white"
+            />
+          ) : isMd && showPreview ? (
             <div
               id="file-viewer-content"
               className="p-4 text-text select-text prose prose-invert prose-sm max-w-none
