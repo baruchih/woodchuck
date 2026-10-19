@@ -16,7 +16,7 @@ use super::terminal_stream;
 use crate::config::Config;
 use crate::controller::poller::{add_subscriber, remove_subscriber, SubscriberMap};
 use crate::model::{
-    create_session, delete_session, detect_status, get_session, get_session_output, list_sessions,
+    create_session, delete_session, get_session, get_session_output, list_sessions,
     send_input, validate_rename, CreateSessionParams, SharedSessionStates,
 };
 use crate::utils::{PersistedSessionState, SessionStore, TmuxClient};
@@ -202,9 +202,9 @@ pub async fn handle_connection(
             ClientMessage::GetSession { session_id, request_id } => {
                 handle_get_session(&session_id, &tx, &tmux, &session_states, request_id).await;
             }
-            ClientMessage::CreateSession { name, folder, prompt, request_id } => {
+            ClientMessage::CreateSession { name, folder, prompt, agent, request_id } => {
                 handle_create_session(
-                    name, folder, prompt, request_id,
+                    name, folder, prompt, agent, request_id,
                     &tx, &tmux, &config, &session_states, &session_store, &global_broadcast,
                 ).await;
             }
@@ -274,10 +274,11 @@ async fn handle_subscribe(
         }
     }
 
-    // Get current output for initial state
+    // Get current output for initial state, read with the rules for the session's agent
+    let agent = session_states.read().await.get(session_id).map(|s| s.agent).unwrap_or_default();
     let (current_output, status) = match tmux.capture_pane(session_id, 200).await {
         Ok(output) => {
-            let status = detect_status(&output);
+            let status = crate::model::output::detect_status_for(agent, &output);
             (output, status)
         }
         Err(e) => {
@@ -472,7 +473,10 @@ async fn handle_get_sessions(
                 debug!(session_id = %session.id, "Creating default state for discovered session");
                 crate::model::SessionState::default()
             });
-            if ss.status != crate::model::SessionStatus::Resting || ss.working_since.is_some() {
+            if ss.agent == crate::model::types::Agent::Codex
+                || ss.status != crate::model::SessionStatus::Resting
+                || ss.working_since.is_some()
+            {
                 session.status = ss.status;
             }
             session.working_since = ss.working_since;
@@ -481,6 +485,7 @@ async fn handle_get_sessions(
             session.last_input_at = ss.last_input_at;
             session.tags = ss.tags.clone();
             session.ralph_enabled = ss.ralph_enabled;
+            session.agent = ss.agent;
             if !ss.name.is_empty() {
                 session.name = ss.name.clone();
             }
@@ -517,7 +522,10 @@ async fn handle_get_session(
     {
         let states = session_states.read().await;
         if let Some(ss) = states.get(session_id) {
-            if ss.status != crate::model::SessionStatus::Resting || ss.working_since.is_some() {
+            if ss.agent == crate::model::types::Agent::Codex
+                || ss.status != crate::model::SessionStatus::Resting
+                || ss.working_since.is_some()
+            {
                 session.status = ss.status;
             }
             session.working_since = ss.working_since;
@@ -526,6 +534,7 @@ async fn handle_get_session(
             session.last_input_at = ss.last_input_at;
             session.tags = ss.tags.clone();
             session.ralph_enabled = ss.ralph_enabled;
+            session.agent = ss.agent;
             if !ss.name.is_empty() {
                 session.name = ss.name.clone();
             }
@@ -548,6 +557,7 @@ async fn handle_create_session(
     name: String,
     folder: String,
     prompt: String,
+    agent: crate::model::types::Agent,
     request_id: Option<String>,
     tx: &mpsc::Sender<ServerMessage>,
     tmux: &Arc<dyn TmuxClient>,
@@ -556,7 +566,7 @@ async fn handle_create_session(
     session_store: &Arc<dyn SessionStore>,
     global_broadcast: &tokio::sync::broadcast::Sender<ServerMessage>,
 ) {
-    let params = CreateSessionParams { name, folder, prompt };
+    let params = CreateSessionParams { name, folder, prompt, agent };
 
     let session = match create_session(tmux.as_ref(), config, params).await {
         Ok(s) => s,
@@ -575,17 +585,21 @@ async fn handle_create_session(
         let mut states = session_states.write().await;
         let mut state = crate::model::SessionState::with_name(session.name.clone());
         state.folder = Some(session.folder.clone());
+        state.agent = session.agent;
         states.insert(session.id.clone(), state);
     }
 
-    // Inject hooks (non-fatal)
-    if let Err(e) = crate::utils::inject_hooks(&session.id, &session.folder, &config.external_url).await {
-        warn!(session = %session.id, error = %e, "Hook injection failed, session created without hooks");
+    // Inject Claude Code hooks (non-fatal)
+    if session.agent.uses_claude_hooks() {
+        if let Err(e) = crate::utils::inject_hooks(&session.id, &session.folder, &config.external_url).await {
+            warn!(session = %session.id, error = %e, "Hook injection failed, session created without hooks");
+        }
     }
 
     // Persist session state
     let mut persisted_state = PersistedSessionState::with_name(session.name.clone());
     persisted_state.folder = Some(session.folder.clone());
+    persisted_state.agent = session.agent;
     if let Err(e) = session_store.save(&session.id, &persisted_state).await {
         warn!(session = %session.id, error = %e, "Failed to persist session state");
     }

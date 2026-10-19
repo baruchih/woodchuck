@@ -62,6 +62,9 @@ pub enum ClientMessage {
         folder: String,
         #[serde(default)]
         prompt: String,
+        /// Which agent to run (defaults to Claude)
+        #[serde(default)]
+        agent: crate::model::types::Agent,
         #[serde(default)]
         request_id: Option<String>,
     },

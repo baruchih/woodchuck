@@ -2,7 +2,7 @@
 //!
 //! Analyzes terminal output to determine Claude's current status.
 
-use super::types::SessionStatus;
+use super::types::{Agent, SessionStatus};
 
 /// Strip ANSI escape sequences from a string.
 ///
@@ -139,6 +139,63 @@ fn is_at_prompt(output: &str) -> bool {
 fn is_interruptible(output: &str) -> bool {
     let clean = strip_ansi(output);
     clean.contains("esc to interrupt")
+}
+
+/// Detect a session's status from its screen, using the rules for its agent
+pub fn detect_status_for(agent: Agent, output: &str) -> SessionStatus {
+    match agent {
+        Agent::Claude => detect_status(output),
+        Agent::Codex => detect_codex_status(output),
+    }
+}
+
+/// Detect Codex's status from its screen.
+///
+/// Codex's input box (a line starting with `›`) is always on screen, so being
+/// "at a prompt" says nothing. What sits directly above the input box does:
+/// - a turn summary ("Worked for 10s • 19:46") or an interruption (`■ …`): resting
+/// - the startup banner (`>_ OpenAI Codex`) with no turn yet (no `•` lines): resting
+/// - anything else (streamed reply text, tool output): working
+///
+/// A reply marks only its first line with `•`, and the fullscreen UI keeps no
+/// scrollback, so mid-way through a long reply neither `•` nor the banner is on
+/// screen: that must read as working, not as a fresh session.
+/// Approval prompts and menus are waiting for input; "esc to interrupt" is working.
+fn detect_codex_status(output: &str) -> SessionStatus {
+    let clean = strip_ansi(output);
+    let lines: Vec<&str> = clean.lines().filter(|l| !l.trim().is_empty()).collect();
+
+    let recent = lines.iter().rev().take(10).map(|l| l.to_lowercase()).collect::<Vec<_>>().join("\n");
+    if contains_any(&recent, &[
+        "would you like to run",
+        "would you like to make",
+        "yes, proceed",
+        "press enter to confirm",
+        "enter to confirm",
+        "trust this folder",
+        "esc to cancel",
+    ]) {
+        return SessionStatus::NeedsInput;
+    }
+
+    if clean.contains("esc to interrupt") {
+        return SessionStatus::Working;
+    }
+
+    let Some(input_box) = lines.iter().rposition(|l| l.trim_start().starts_with('›')) else {
+        // No input box: starting up, or not Codex's UI at all
+        return if lines.is_empty() { SessionStatus::Resting } else { SessionStatus::Working };
+    };
+    let above = &lines[..input_box];
+    let banner = above.iter().any(|l| l.contains(">_ OpenAI Codex"));
+    let turns = above.iter().any(|l| l.trim_start().starts_with('•'));
+    if banner && !turns {
+        return SessionStatus::Resting;
+    }
+    match above.last().map(|l| l.trim_start()) {
+        Some(l) if l.starts_with("Worked for") || l.starts_with('■') => SessionStatus::Resting,
+        _ => SessionStatus::Working,
+    }
 }
 
 /// Detect the current status of Claude based on terminal output
@@ -589,5 +646,83 @@ Esc to cancel · Tab to amend"#;
         assert!(is_interruptible("  esc to interrupt"));
         assert!(!is_interruptible("ctrl+t to hide tasks"));
         assert!(!is_interruptible("just some text"));
+    }
+
+    // Trimmed from real Codex CLI 0.163 screens (footer lines included)
+    const CODEX_FOOTER: &str = "  GPT-6.1-Sol default · /tmp/proj\n  ? for shortcuts                ⚠ 1 warning · f2 to view\n";
+
+    #[test]
+    fn test_codex_fresh_session_is_resting() {
+        let screen = format!(
+            "  >_ OpenAI Codex (v0.163.0)\n     /tmp/proj\n\n› Ask Codex to do anything\n{CODEX_FOOTER}"
+        );
+        assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Resting);
+    }
+
+    #[test]
+    fn test_codex_streaming_reply_is_working() {
+        let screen = format!(
+            "› Write a poem\n• 1. A cursor waits quietly.\n  2. I summon tmux\n› Ask Codex to do anything\n{CODEX_FOOTER}"
+        );
+        assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Working);
+    }
+
+    #[test]
+    fn test_codex_long_reply_scrolled_past_its_first_line_is_working() {
+        // The `•` first line and the banner have scrolled off the screen
+        let screen = format!(
+            "  31. Ullamcorper eget nulla.\n  32. Enim sed faucibus turpis egestas.\n  33. Sed tempus urna et phare\n› Ask Codex to do anything\n{CODEX_FOOTER}"
+        );
+        assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Working);
+    }
+
+    #[test]
+    fn test_codex_long_reply_finished_is_resting() {
+        let screen = format!(
+            "  59. Feugiat in ante metus.\n  60. Dictum at tempor commodo.\n  Worked for 17s • 20:31\n› Ask Codex to do anything\n{CODEX_FOOTER}"
+        );
+        assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Resting);
+    }
+
+    #[test]
+    fn test_codex_tool_run_is_working() {
+        let screen = format!(
+            "› Run curl\n• I’ll run the command.\n• Working (1m 01s • esc to interrupt)\n  └ Tip: Use /agents\n› Ask Codex to do anything\n{CODEX_FOOTER}"
+        );
+        assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Working);
+    }
+
+    #[test]
+    fn test_codex_finished_turn_is_resting() {
+        let screen = format!(
+            "› Write lines\n• 1. Lorem ipsum.\n  40. In culpa qui officia.\n  Worked for 10s • 19:46\n› Ask Codex to do anything\n{CODEX_FOOTER}"
+        );
+        assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Resting);
+    }
+
+    #[test]
+    fn test_codex_interrupted_turn_is_resting() {
+        let screen = format!(
+            "• 9. I name every\n■ Conversation interrupted - use /feedback if something went wrong\n› Ask Codex to do anything\n{CODEX_FOOTER}"
+        );
+        assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Resting);
+    }
+
+    #[test]
+    fn test_codex_approval_needs_input() {
+        let screen = "• Running printf 'hi' > hello.txt\n  Would you like to run the following command?\n  $ printf 'hi' > hello.txt\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again (p)\n  3. No, and tell Codex what to do differently (esc)\n  Press enter to confirm or esc to cancel\n";
+        assert_eq!(detect_status_for(Agent::Codex, screen), SessionStatus::NeedsInput);
+    }
+
+    #[test]
+    fn test_codex_trust_prompt_needs_input() {
+        let screen = "  Trust this folder? Codex can read, edit, and run files here\n› 1. Trust and continue\n  2. Quit\n  enter continue · esc quit\n";
+        assert_eq!(detect_status_for(Agent::Codex, screen), SessionStatus::NeedsInput);
+    }
+
+    #[test]
+    fn test_claude_rules_unchanged_for_claude_agent() {
+        let screen = "some output\n❯ ";
+        assert_eq!(detect_status_for(Agent::Claude, screen), detect_status(screen));
     }
 }

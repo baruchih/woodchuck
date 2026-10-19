@@ -10,7 +10,46 @@ use std::fmt;
 // Session
 // =============================================================================
 
-/// A Claude Code session running in tmux
+/// The coding agent a session runs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Agent {
+    /// Claude Code (`claude`)
+    #[default]
+    Claude,
+    /// OpenAI Codex CLI (`codex`)
+    Codex,
+}
+
+impl Agent {
+    /// Command that starts a new conversation, with an optional first prompt
+    /// (already shell-escaped)
+    pub fn start_command(self, escaped_prompt: Option<&str>) -> String {
+        let bin = match self {
+            Agent::Claude => "claude",
+            Agent::Codex => "codex",
+        };
+        match escaped_prompt {
+            Some(prompt) => format!("{} {}", bin, prompt),
+            None => bin.to_string(),
+        }
+    }
+
+    /// Command that continues the most recent conversation in the session's folder
+    pub fn resume_command(self) -> &'static str {
+        match self {
+            Agent::Claude => "claude --continue",
+            Agent::Codex => "codex resume --last",
+        }
+    }
+
+    /// Whether Woodchuck injects its Claude Code status hooks into the project
+    pub fn uses_claude_hooks(self) -> bool {
+        self == Agent::Claude
+    }
+}
+
+/// A coding agent session running in tmux
 #[derive(Debug, Clone, Serialize)]
 pub struct Session {
     /// Session ID (same as name)
@@ -58,6 +97,9 @@ pub struct Session {
     /// Whether a per-session ralph loop is enabled
     #[serde(default)]
     pub ralph_enabled: bool,
+
+    /// The coding agent running in this session
+    pub agent: Agent,
 }
 
 // =============================================================================
@@ -147,8 +189,12 @@ pub struct CreateSessionParams {
     /// Project folder path
     pub folder: String,
 
-    /// Initial prompt for Claude
+    /// Initial prompt for the agent
     pub prompt: String,
+
+    /// Which agent to run (defaults to Claude)
+    #[serde(default)]
+    pub agent: Agent,
 }
 
 /// Parameters for sending input to a session
@@ -338,5 +384,23 @@ mod tests {
 
         let status: SessionStatus = serde_json::from_str("\"resting\"").unwrap();
         assert_eq!(status, SessionStatus::Resting);
+    }
+
+    #[test]
+    fn test_agent_commands() {
+        assert_eq!(Agent::Claude.start_command(None), "claude");
+        assert_eq!(Agent::Codex.start_command(Some("'fix the bug'")), "codex 'fix the bug'");
+        assert_eq!(Agent::Claude.resume_command(), "claude --continue");
+        assert_eq!(Agent::Codex.resume_command(), "codex resume --last");
+        assert!(Agent::Claude.uses_claude_hooks());
+        assert!(!Agent::Codex.uses_claude_hooks());
+    }
+
+    #[test]
+    fn test_create_params_agent_defaults_to_claude() {
+        let p: CreateSessionParams = serde_json::from_str(r#"{"name":"a","folder":"/x","prompt":""}"#).unwrap();
+        assert_eq!(p.agent, Agent::Claude);
+        let p: CreateSessionParams = serde_json::from_str(r#"{"name":"a","folder":"/x","prompt":"","agent":"codex"}"#).unwrap();
+        assert_eq!(p.agent, Agent::Codex);
     }
 }

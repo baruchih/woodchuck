@@ -13,7 +13,7 @@ use tracing::{debug, info, instrument};
 
 use super::error::{ModelError, Result};
 use super::output::detect_status;
-use super::types::{CreateSessionParams, Session, SessionStatus};
+use super::types::{Agent, CreateSessionParams, Session, SessionStatus};
 use crate::config::Config;
 use crate::utils::detect_git_branch;
 use crate::utils::tmux::TmuxClient;
@@ -137,6 +137,7 @@ pub async fn list_sessions(tmux: &(impl TmuxClient + ?Sized)) -> Result<Vec<Sess
             last_input_at: None, // Will be overlaid from shared state in handler
             tags: Vec::new(),    // Will be overlaid from shared state in handler
             ralph_enabled: false, // Will be overlaid from shared state in handler
+            agent: Agent::Claude, // Will be overlaid from shared state in handler
         }
     }).collect();
 
@@ -184,6 +185,7 @@ pub async fn get_session(tmux: &(impl TmuxClient + ?Sized), session_id: &str) ->
         last_input_at: None,  // Will be overlaid from shared state in handler
         tags: Vec::new(),     // Will be overlaid from shared state in handler
         ralph_enabled: false, // Will be overlaid from shared state in handler
+        agent: Agent::Claude, // Will be overlaid from shared state in handler
     })
 }
 
@@ -197,7 +199,7 @@ pub async fn get_session_output(tmux: &(impl TmuxClient + ?Sized), session_id: &
     tmux.capture_pane(session_id, lines).await
 }
 
-/// Create a new Claude session
+/// Create a new agent session
 #[instrument(skip(tmux, config), fields(session_name = %params.name))]
 pub async fn create_session(
     tmux: &(impl TmuxClient + ?Sized),
@@ -236,12 +238,12 @@ pub async fn create_session(
         return Err(ModelError::SessionAlreadyExists(session_id));
     }
 
-    // Build the command — start claude with optional prompt
+    // Build the command — start the agent with an optional first prompt
     let cmd = if params.prompt.is_empty() {
-        "claude".to_string()
+        params.agent.start_command(None)
     } else {
         let escaped_prompt = escape(Cow::Borrowed(&params.prompt));
-        format!("claude {}", escaped_prompt)
+        params.agent.start_command(Some(&escaped_prompt))
     };
 
     // Detect git branch before creating session (folder already validated)
@@ -267,6 +269,7 @@ pub async fn create_session(
         last_input_at: None,      // No input sent yet
         tags: Vec::new(),         // No tags by default
         ralph_enabled: false,     // Ralph disabled by default
+        agent: params.agent,
     })
 }
 

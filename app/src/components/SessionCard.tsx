@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { Session } from '../types';
 import { StatusBadge } from './StatusBadge';
 import { truncatePath } from '../utils/path';
+import { AgentBadge } from './AgentBadge';
 
 interface SessionCardProps {
   session: Session;
@@ -105,12 +106,15 @@ export function SessionCard({ session, onClick, onDelete, onNewInFolder, onRenam
               className="w-full bg-background border border-primary rounded-sm px-2 py-1 text-text font-medium text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             />
           ) : (
-            <h3
-              className={`text-text font-medium truncate ${onRename ? 'cursor-text hover:text-primary' : ''}`}
-              onClick={handleNameClick}
-            >
-              {session.name}
-            </h3>
+            <div className="flex items-center gap-2 min-w-0">
+              <h3
+                className={`text-text font-medium truncate ${onRename ? 'cursor-text hover:text-primary' : ''}`}
+                onClick={handleNameClick}
+              >
+                {session.name}
+              </h3>
+              <AgentBadge agent={session.agent} />
+            </div>
           )}
         </div>
         <div className="flex items-center gap-1 shrink-0">

@@ -3,6 +3,7 @@ import type { Session } from '../types';
 import { StatusBadge } from './StatusBadge';
 import { ansiToHtml } from '../utils/ansi';
 import { getFolderName } from '../utils/path';
+import { AgentBadge } from './AgentBadge';
 
 interface GridCardProps {
   session: Session;
@@ -59,6 +60,7 @@ export function GridCard({
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <StatusBadge status={session.status} size="sm" workingSince={session.working_since} />
           <span className="text-text font-medium text-xs truncate">{session.name}</span>
+          <AgentBadge agent={session.agent} />
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {onShowInfo && (

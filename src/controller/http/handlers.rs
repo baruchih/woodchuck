@@ -79,10 +79,16 @@ pub async fn list_sessions_handler(
                 crate::model::SessionState::default()
             });
             // Prefer hook-provided status over terminal-parsed status if available
-            // Hook status is more reliable (from Claude Code hooks) vs fragile terminal parsing
-            if ss.status != crate::model::SessionStatus::Resting || ss.working_since.is_some() {
+            // Hook status is more reliable (from Claude Code hooks) vs fragile terminal parsing.
+            // Codex sessions always use the stored status: the poller reads their screen
+            // with Codex's rules, while list_sessions parsed it with Claude's.
+            if ss.agent == crate::model::types::Agent::Codex
+                || ss.status != crate::model::SessionStatus::Resting
+                || ss.working_since.is_some()
+            {
                 session.status = ss.status;
             }
+            session.agent = ss.agent;
             session.working_since = ss.working_since;
             session.project_id = ss.project_id.clone();
             session.last_input = ss.last_input.clone();
@@ -122,9 +128,14 @@ pub async fn get_session_handler(
     let states = state.session_states.read().await;
     if let Some(ss) = states.get(&session.id) {
         // Prefer hook-provided status over terminal-parsed status if available
-        if ss.status != crate::model::SessionStatus::Resting || ss.working_since.is_some() {
+        // (always for Codex: the poller reads its screen with Codex's rules)
+        if ss.agent == crate::model::types::Agent::Codex
+            || ss.status != crate::model::SessionStatus::Resting
+            || ss.working_since.is_some()
+        {
             session.status = ss.status;
         }
+        session.agent = ss.agent;
         session.working_since = ss.working_since;
         session.project_id = ss.project_id.clone();
         session.last_input = ss.last_input.clone();
@@ -158,15 +169,21 @@ pub async fn create_session_handler(
         .map_err(err)?;
 
     state.track_session(&session.id, &session.name, &session.folder).await;
+    if let Some(ss) = state.session_states.write().await.get_mut(&session.id) {
+        ss.agent = session.agent;
+    }
 
     // Inject Claude Code hooks into the project folder (non-fatal if fails)
-    if let Err(e) = crate::utils::inject_hooks(&session.id, &session.folder, &state.config.external_url).await {
-        warn!(session = %session.id, error = %e, "Hook injection failed, session created without hooks");
+    if session.agent.uses_claude_hooks() {
+        if let Err(e) = crate::utils::inject_hooks(&session.id, &session.folder, &state.config.external_url).await {
+            warn!(session = %session.id, error = %e, "Hook injection failed, session created without hooks");
+        }
     }
 
     // Persist session state (non-fatal if fails)
     let mut persisted_state = crate::utils::PersistedSessionState::with_name(session.name.clone());
     persisted_state.folder = Some(session.folder.clone());
+    persisted_state.agent = session.agent;
     if let Err(e) = state.session_store.save(&session.id, &persisted_state).await {
         warn!(session = %session.id, error = %e, "Failed to persist session state");
     }
@@ -202,7 +219,7 @@ pub async fn delete_session_handler(
     Ok(ApiResponse::ok(SessionKilledData { killed: true }))
 }
 
-/// POST /sessions/:id/restart - Restart a session with claude --continue
+/// POST /sessions/:id/restart - Restart a session, continuing its last conversation
 #[instrument(skip(state))]
 pub async fn restart_session_handler(
     State(state): State<AppState>,
@@ -214,10 +231,13 @@ pub async fn restart_session_handler(
         .map_err(err)?;
     let folder = session.folder.clone();
 
-    // Check if ralph was enabled (to restore after restart)
-    let ralph_was_enabled = {
+    // Check if ralph was enabled (to restore after restart), and which agent runs here
+    let (ralph_was_enabled, agent) = {
         let states = state.session_states.read().await;
-        states.get(&session_id).map(|s| s.ralph_enabled).unwrap_or(false)
+        states
+            .get(&session_id)
+            .map(|s| (s.ralph_enabled, s.agent))
+            .unwrap_or((false, crate::model::types::Agent::Claude))
     };
 
     // Stop ralph loop before killing
@@ -231,13 +251,13 @@ pub async fn restart_session_handler(
     // Small delay to let tmux clean up
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    // Respawn with claude --continue in the same folder.
+    // Respawn continuing the last conversation in the same folder.
     // The maintainer keeps its special launch flags (see start_maintainer).
     let is_maintainer = session_id == crate::controller::maintainer::MAINTAINER_SESSION_ID;
     let cmd = if is_maintainer {
         "claude --continue --permission-mode auto"
     } else {
-        "claude --continue"
+        agent.resume_command()
     };
     state.tmux.new_session(&session_id, &folder, cmd)
         .await
@@ -252,9 +272,11 @@ pub async fn restart_session_handler(
         }
     }
 
-    // Re-inject hooks (non-fatal)
-    if let Err(e) = crate::utils::inject_hooks(&session_id, &folder, &state.config.external_url).await {
-        warn!(session = %session_id, error = %e, "Hook re-injection failed during restart");
+    // Re-inject Claude Code hooks (non-fatal)
+    if agent.uses_claude_hooks() {
+        if let Err(e) = crate::utils::inject_hooks(&session_id, &folder, &state.config.external_url).await {
+            warn!(session = %session_id, error = %e, "Hook re-injection failed during restart");
+        }
     }
 
     // Persist updated state
@@ -290,6 +312,7 @@ pub async fn restart_session_handler(
         last_input_at: session.last_input_at,
         tags: session.tags,
         ralph_enabled: ralph_was_enabled,
+        agent,
     };
 
     // Restart ralph loop. The maintainer's loop (inbox + auto-deploy) was
@@ -313,7 +336,7 @@ pub async fn restart_session_handler(
         state.toggle_ralph(&session_id, true, &state.tmux, &state.session_states, &state.config.data_dir).await;
     }
 
-    info!(session = %session_id, "Restarted session with claude --continue");
+    info!(session = %session_id, command = %cmd, "Restarted session");
     Ok(ApiResponse::ok(SessionCreatedData { session: restarted }))
 }
 
@@ -733,7 +756,15 @@ pub async fn list_commands_handler(
     State(state): State<AppState>,
     Query(query): Query<CommandsQuery>,
 ) -> Json<ApiResponse<CommandsData>> {
-    let commands = if let Some(ref session_id) = query.session_id {
+    let agent = match query.session_id {
+        Some(ref id) => state.session_states.read().await.get(id).map(|s| s.agent).unwrap_or_default(),
+        None => crate::model::types::Agent::Claude,
+    };
+    let commands = if agent != crate::model::types::Agent::Claude {
+        // These are Claude Code's commands and skills. Other agents show their own
+        // menu when "/" is typed in the terminal.
+        Vec::new()
+    } else if let Some(ref session_id) = query.session_id {
         // Try to get the session's folder for skill discovery
         match get_session(state.tmux.as_ref(), session_id).await {
             Ok(session) => {
@@ -2053,7 +2084,7 @@ pub async fn list_orphaned_handler(
     Ok(ApiResponse::ok(OrphanedSessionsData { sessions: orphaned }))
 }
 
-/// POST /sessions/:id/recover - Recover an orphaned session with claude --continue
+/// POST /sessions/:id/recover - Recover an orphaned session, continuing its last conversation
 #[instrument(skip(state))]
 pub async fn recover_session_handler(
     State(state): State<AppState>,
@@ -2077,8 +2108,8 @@ pub async fn recover_session_handler(
         return Err(err_msg(StatusCode::CONFLICT, "Session is already running", "SESSION_ALREADY_EXISTS"));
     }
 
-    // Respawn tmux session with claude --continue
-    let cmd = "claude --continue";
+    // Respawn the tmux session, continuing the agent's last conversation
+    let cmd = persisted.agent.resume_command();
     state.tmux.new_session(&session_id, folder, cmd).await.map_err(err)?;
 
     // Track in session states
@@ -2090,9 +2121,11 @@ pub async fn recover_session_handler(
         states.insert(session_id.clone(), ss);
     }
 
-    // Re-inject hooks (non-fatal)
-    if let Err(e) = crate::utils::inject_hooks(&session_id, folder, &state.config.external_url).await {
-        warn!(session = %session_id, error = %e, "Hook re-injection failed during recovery");
+    // Re-inject Claude Code hooks (non-fatal)
+    if persisted.agent.uses_claude_hooks() {
+        if let Err(e) = crate::utils::inject_hooks(&session_id, folder, &state.config.external_url).await {
+            warn!(session = %session_id, error = %e, "Hook re-injection failed during recovery");
+        }
     }
 
     // Update persisted state
@@ -2123,6 +2156,7 @@ pub async fn recover_session_handler(
         last_input_at: persisted.last_input_at,
         tags: persisted.tags.clone(),
         ralph_enabled: persisted.ralph_enabled,
+        agent: persisted.agent,
     };
 
     info!(session = %session_id, folder = %folder, "Recovered orphaned session");

@@ -7,9 +7,25 @@ import { Button } from '../components/Button';
 import { api } from '../api/client';
 import { getFolderName, truncatePath } from '../utils/path';
 import { useTemplates } from '../hooks/useTemplates';
-import type { OrphanedSession } from '../types';
+import type { Agent, OrphanedSession } from '../types';
 
 type Step = 'folder' | 'name';
+
+const AGENT_STORAGE_KEY = 'woodchuck.newSessionAgent';
+
+const AGENTS: { id: Agent; label: string }[] = [
+  { id: 'claude', label: 'Claude Code' },
+  { id: 'codex', label: 'Codex' },
+];
+
+/** The agent this browser picked last time (a per-viewer convenience) */
+function loadAgent(): Agent {
+  try {
+    return localStorage.getItem(AGENT_STORAGE_KEY) === 'codex' ? 'codex' : 'claude';
+  } catch {
+    return 'claude';
+  }
+}
 
 export function NewSessionPage() {
   const navigate = useNavigate();
@@ -21,6 +37,15 @@ export function NewSessionPage() {
   const [selectedFolder, setSelectedFolder] = useState<string | null>(folderFromUrl);
   const [sessionName, setSessionName] = useState(folderFromUrl ? getFolderName(folderFromUrl) : '');
   const [sessionPrompt, setSessionPrompt] = useState('');
+  const [agent, setAgent] = useState<Agent>(loadAgent);
+  const chooseAgent = useCallback((next: Agent) => {
+    setAgent(next);
+    try {
+      localStorage.setItem(AGENT_STORAGE_KEY, next);
+    } catch {
+      // Storage unavailable (private mode): the choice just isn't remembered
+    }
+  }, []);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,6 +128,7 @@ export function NewSessionPage() {
         name: sessionName.trim(),
         folder: selectedFolder,
         prompt: sessionPrompt,
+        agent,
       });
 
       navigate(`/session/${encodeURIComponent(data.session.id)}`);
@@ -111,7 +137,7 @@ export function NewSessionPage() {
       setError(message);
       setCreating(false);
     }
-  }, [selectedFolder, sessionName, sessionPrompt, creating, navigate]);
+  }, [selectedFolder, sessionName, sessionPrompt, agent, creating, navigate]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && sessionName.trim()) {
@@ -238,6 +264,30 @@ export function NewSessionPage() {
               >
                 Change
               </button>
+            </div>
+          </div>
+
+          {/* Agent choice */}
+          <div>
+            <span className="block text-text text-xs uppercase tracking-wider mb-2">Agent</span>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Agent">
+              {AGENTS.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={agent === a.id}
+                  onClick={() => chooseAgent(a.id)}
+                  disabled={creating}
+                  className={`p-3 rounded-sm border text-sm font-mono transition-colors disabled:opacity-50 ${
+                    agent === a.id
+                      ? 'border-primary text-primary bg-primary/10'
+                      : 'border-border text-text-muted hover:text-text hover:border-text-muted'
+                  }`}
+                >
+                  {a.label}
+                </button>
+              ))}
             </div>
           </div>
 

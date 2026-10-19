@@ -218,6 +218,7 @@ async fn start_maintainer(
                     last_notified_status: None,
                     folder: Some(repo_dir),
                     ralph_enabled: false,
+                    agent: crate::model::types::Agent::Claude,
                 };
                 let store = session_store.clone();
                 let sid = session_id.to_string();

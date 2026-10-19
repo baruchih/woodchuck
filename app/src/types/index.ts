@@ -1,5 +1,8 @@
 export type SessionStatus = 'resting' | 'working' | 'needs_input' | 'error';
 
+/** The coding agent a session runs */
+export type Agent = 'claude' | 'codex';
+
 export interface Session {
   id: string;
   name: string;
@@ -14,6 +17,8 @@ export interface Session {
   last_input_at?: string;
   tags?: string[];
   ralph_enabled?: boolean;
+  /** Older servers omit this; treat missing as 'claude' */
+  agent?: Agent;
 }
 
 export interface OrphanedSession {
@@ -43,6 +48,7 @@ export interface CreateSessionParams {
   name: string;
   folder: string;
   prompt: string;
+  agent?: Agent;
 }
 
 export interface SessionWithOutput {

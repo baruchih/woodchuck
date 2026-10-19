@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
 
 use super::output::{calculate_hash, diff_output};
-use super::types::SessionStatus;
+use super::types::{Agent, SessionStatus};
 use crate::utils::PersistedSessionState;
 
 /// State for a single session (pure model data)
@@ -69,6 +69,9 @@ pub struct SessionState {
 
     /// Whether a per-session ralph loop is enabled
     pub ralph_enabled: bool,
+
+    /// The coding agent running in the session (decides how its screen is read)
+    pub agent: Agent,
 }
 
 impl Default for SessionState {
@@ -91,6 +94,7 @@ impl Default for SessionState {
             last_notified_status: None,
             status_stable_since: None,
             ralph_enabled: false,
+            agent: Agent::Claude,
         }
     }
 }
@@ -127,6 +131,7 @@ impl SessionState {
             folder: persisted.folder,
             last_notified_status,
             ralph_enabled: persisted.ralph_enabled,
+            agent: persisted.agent,
             ..Self::default()
         }
     }
@@ -145,6 +150,7 @@ impl SessionState {
             last_notified_status: self.last_notified_status,
             folder: self.folder.clone(),
             ralph_enabled: self.ralph_enabled,
+            agent: self.agent,
         }
     }
 
@@ -170,7 +176,7 @@ impl SessionState {
         self.last_output_hash = hash;
 
         // Detect new status
-        let new_status = super::output::detect_status(new_output);
+        let new_status = super::output::detect_status_for(self.agent, new_output);
         let status_changed = new_status != old_status;
         self.status = new_status;
 

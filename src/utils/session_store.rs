@@ -78,6 +78,10 @@ pub struct PersistedSessionState {
     /// Whether a per-session ralph loop is enabled
     #[serde(default)]
     pub ralph_enabled: bool,
+
+    /// The coding agent running in the session (older entries are Claude)
+    #[serde(default)]
+    pub agent: crate::model::types::Agent,
 }
 
 /// Persisted project state (stored to disk)
@@ -635,6 +639,7 @@ mod tests {
             last_notified_status: None,
             folder: None,
             ralph_enabled: false,
+            agent: crate::model::types::Agent::Codex,
         };
         let state2 = PersistedSessionState::with_name("Second Session".to_string());
 
@@ -648,6 +653,7 @@ mod tests {
         let loaded1 = sessions.get("session-1").unwrap();
         assert_eq!(loaded1.name, "First Session");
         assert_eq!(loaded1.status, SessionStatus::Working);
+        assert_eq!(loaded1.agent, crate::model::types::Agent::Codex);
         assert!(loaded1.working_since.is_some());
 
         let loaded2 = sessions.get("session-2").unwrap();
@@ -728,6 +734,7 @@ mod tests {
                 last_notified_status: None,
                 folder: None,
                 ralph_enabled: false,
+                agent: crate::model::types::Agent::Claude,
             };
             store.save("persistent-1", &state).await.unwrap();
         }
@@ -916,5 +923,23 @@ mod tests {
 
         let sessions = store.load().await.unwrap();
         assert!(sessions.get("session-1").unwrap().project_id.is_none());
+    }
+
+    #[test]
+    fn test_persisted_state_without_agent_is_claude() {
+        // Saved before sessions had an agent
+        let json = r#"{"name": "Old Session", "status": "resting"}"#;
+        let state: PersistedSessionState = serde_json::from_str(json).unwrap();
+        assert_eq!(state.agent, crate::model::types::Agent::Claude);
+    }
+
+    #[test]
+    fn test_persisted_state_agent_round_trip() {
+        let mut state = PersistedSessionState::with_name("Codex".to_string());
+        state.agent = crate::model::types::Agent::Codex;
+        let json = serde_json::to_string(&state).unwrap();
+        assert!(json.contains("\"agent\":\"codex\""), "{json}");
+        let back: PersistedSessionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.agent, crate::model::types::Agent::Codex);
     }
 }
