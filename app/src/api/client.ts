@@ -22,6 +22,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export type ProgressCallback = (progress: number) => void;
 
 /** Upload FormData via XHR with progress tracking. Returns parsed response data. */
+/** Abort an upload after this long without progress */
+const UPLOAD_STALL_MS = 60_000;
+
 function uploadWithProgress<T>(
   url: string,
   formData: FormData,
@@ -30,23 +33,42 @@ function uploadWithProgress<T>(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
-    xhr.timeout = 5 * 60 * 1000; // 5 minute timeout
 
-    if (onProgress) {
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          onProgress(Math.round((e.loaded / e.total) * 100));
-        }
-      };
-    }
+    // No limit on total time — a large file on a slow link can take a long while.
+    // Give up only when the upload stops making progress.
+    let lastProgressAt = Date.now();
+    let stalled = false;
+    const stallTimer = window.setInterval(() => {
+      if (Date.now() - lastProgressAt > UPLOAD_STALL_MS) {
+        stalled = true;
+        xhr.abort();
+      }
+    }, 5000);
+    const done = () => window.clearInterval(stallTimer);
+
+    xhr.upload.onprogress = (e) => {
+      lastProgressAt = Date.now();
+      if (onProgress && e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    // Once the body is sent, the server writes it to disk before replying
+    xhr.upload.onload = () => { lastProgressAt = Date.now(); };
 
     xhr.onload = () => {
+      done();
       if (xhr.status === 0 || xhr.status >= 500) {
         reject(new Error(`Server error (${xhr.status})`));
         return;
       }
       if (xhr.status === 413) {
-        reject(new Error('File too large'));
+        let message = 'File too large';
+        try {
+          message = JSON.parse(xhr.responseText).error || message;
+        } catch {
+          // Body-limit rejections have no JSON body
+        }
+        reject(new Error(message));
         return;
       }
       try {
@@ -61,9 +83,11 @@ function uploadWithProgress<T>(
       }
     };
 
-    xhr.onerror = () => reject(new Error('Network error during upload'));
-    xhr.onabort = () => reject(new Error('Upload aborted'));
-    xhr.ontimeout = () => reject(new Error('Upload timed out'));
+    xhr.onerror = () => { done(); reject(new Error('Network error during upload')); };
+    xhr.onabort = () => {
+      done();
+      reject(new Error(stalled ? `Upload stalled — no progress for ${UPLOAD_STALL_MS / 1000}s` : 'Upload aborted'));
+    };
 
     xhr.send(formData);
   });

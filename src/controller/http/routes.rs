@@ -29,6 +29,7 @@ use super::handlers::{
     resize_handler, restart_session_handler, send_input_handler, session_files_handler,
     update_deploy_settings_handler, update_session_handler,
     upload_files_handler, upload_image_handler, upload_project_handler, vapid_key_handler,
+    MAX_SESSION_UPLOAD_SIZE,
 };
 use super::rate_limit::{RateLimiter, rate_limit_middleware};
 use super::state::AppState;
@@ -64,9 +65,14 @@ pub fn build_router(state: AppState) -> Router {
     // Upload routes — higher body limit (100 MB), rate limited
     let upload_routes = Router::new()
         .route("/sessions/:id/upload", post(upload_image_handler))
-        .route("/sessions/:id/upload-files", post(upload_files_handler))
         .route("/folders/upload", post(upload_project_handler))
         .route_layer(DefaultBodyLimit::max(100 * 1024 * 1024))
+        .route_layer(middleware::from_fn_with_state(write_limiter.clone(), rate_limit_middleware));
+
+    // Session file uploads stream to disk, so they can be much larger (2 GB)
+    let file_upload_routes = Router::new()
+        .route("/sessions/:id/upload-files", post(upload_files_handler))
+        .route_layer(DefaultBodyLimit::max(MAX_SESSION_UPLOAD_SIZE))
         .route_layer(middleware::from_fn_with_state(write_limiter.clone(), rate_limit_middleware));
 
     // Write routes (rate limited, default body limit)
@@ -103,6 +109,7 @@ pub fn build_router(state: AppState) -> Router {
     let api_router = Router::new()
         .merge(read_routes)
         .merge(upload_routes)
+        .merge(file_upload_routes)
         .merge(write_routes);
 
     // Combine with state and middleware — includes WebSocket on same port

@@ -1415,13 +1415,52 @@ pub async fn upload_image_handler(
     ))
 }
 
-/// Maximum file upload size for session uploads: 100 MB total
-const MAX_SESSION_UPLOAD_SIZE: usize = 100 * 1024 * 1024;
+/// Max total size of one session file upload. Files stream to disk, so this
+/// bounds disk use, not memory. Must match the route's body limit (routes.rs).
+pub const MAX_SESSION_UPLOAD_SIZE: usize = 2 * 1024 * 1024 * 1024;
+
+/// Write one multipart field to `path` as it arrives. Fails (leaving the partial
+/// file for the caller to remove) if it exceeds `max_bytes`.
+async fn stream_field_to_file(
+    field: &mut axum::extract::multipart::Field<'_>,
+    path: &std::path::Path,
+    max_bytes: usize,
+) -> Result<usize, (StatusCode, Json<ApiResponse<()>>)> {
+    use tokio::io::AsyncWriteExt;
+
+    let file = tokio::fs::File::create(path)
+        .await
+        .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to create file: {}", e), "IO_ERROR"))?;
+    let mut out = tokio::io::BufWriter::new(file);
+    let mut size = 0usize;
+    while let Some(chunk) = field
+        .chunk()
+        .await
+        .map_err(|e| err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read file: {}", e), "INVALID_INPUT"))?
+    {
+        size += chunk.len();
+        if size > max_bytes {
+            return Err(err_msg(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                &format!("Total upload too large (max {} MB)", MAX_SESSION_UPLOAD_SIZE / 1024 / 1024),
+                "PAYLOAD_TOO_LARGE",
+            ));
+        }
+        out.write_all(&chunk)
+            .await
+            .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to write file: {}", e), "IO_ERROR"))?;
+    }
+    out.flush()
+        .await
+        .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to write file: {}", e), "IO_ERROR"))?;
+    Ok(size)
+}
 
 /// POST /sessions/:id/upload-files - Upload files to a session's uploads/ folder
 ///
 /// Accepts multiple files via multipart. Files are saved to `{session_folder}/uploads/`
 /// preserving any relative path structure. Returns the list of absolute file paths.
+/// Files stream to disk as they arrive.
 #[instrument(skip(state, multipart))]
 pub async fn upload_files_handler(
     State(state): State<AppState>,
@@ -1449,19 +1488,6 @@ pub async fn upload_files_handler(
         let file_name = field.file_name().unwrap_or("").to_string();
         if file_name.is_empty() {
             continue;
-        }
-
-        let data = field.bytes().await.map_err(|e| {
-            err_msg(StatusCode::BAD_REQUEST, &format!("Failed to read file: {}", e), "INVALID_INPUT")
-        })?;
-
-        total_size += data.len();
-        if total_size > MAX_SESSION_UPLOAD_SIZE {
-            return Err(err_msg(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                &format!("Total upload too large (max {} MB)", MAX_SESSION_UPLOAD_SIZE / 1024 / 1024),
-                "PAYLOAD_TOO_LARGE",
-            ));
         }
 
         // Sanitize the filename: use only the last component to prevent path traversal
@@ -1505,9 +1531,18 @@ pub async fn upload_files_handler(
             out_path
         };
 
-        tokio::fs::write(&final_path, &data)
-            .await
-            .map_err(|e| err_msg(StatusCode::INTERNAL_SERVER_ERROR, &format!("Failed to write file: {}", e), "IO_ERROR"))?;
+        // Stream the file to disk chunk by chunk, so large uploads don't sit in memory.
+        // On any failure, remove the partial file.
+        let mut field = field;
+        let written = stream_field_to_file(&mut field, &final_path, MAX_SESSION_UPLOAD_SIZE - total_size).await;
+        let size = match written {
+            Ok(size) => size,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&final_path).await;
+                return Err(e);
+            }
+        };
+        total_size += size;
 
         let abs_path = final_path
             .canonicalize()

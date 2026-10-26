@@ -147,7 +147,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
       setUploadResult('success', `Uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}`);
     } catch (err) {
       console.error('Failed to upload files:', err);
-      setUploadResult('error', 'Upload failed');
+      setUploadResult('error', err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
     } finally {
       if (filesInputRef.current) filesInputRef.current.value = '';
     }
