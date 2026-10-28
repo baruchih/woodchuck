@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { marked } from 'marked';
 import { api } from '../api/client';
 import { buildPreviewHtml } from '../utils/htmlPreview';
+import { saveDownloadOnClick } from '../utils/saveDownload';
 import type { FileEntry } from '../types';
 
 interface FileBrowserProps {
@@ -218,30 +219,14 @@ export function FileBrowser({ sessionId, onClose }: FileBrowserProps) {
               {!searching && searchResults && searchResults.length > 0 && (
                 <div className="space-y-px">
                   {searchResults.map((entry) => (
-                    <div
+                    <FileNode
                       key={entry.path}
-                      className="flex items-center gap-1.5 py-1.5 px-2 rounded hover:bg-surface cursor-pointer group"
-                      onClick={() => {
-                        const textOk = isViewable(entry.name) && (entry.size == null || entry.size <= 2 * 1024 * 1024);
-                        const imgOk = isImage(entry.name) && (entry.size == null || entry.size <= 20 * 1024 * 1024);
-                        const media = mediaKind(entry.name);
-                        if (textOk || imgOk || media) {
-                          setViewingFile({ path: entry.path, name: entry.name, image: imgOk, media });
-                        }
-                      }}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5 text-text-muted shrink-0">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                      </svg>
-                      <div className="min-w-0 flex-1">
-                        <span className="text-xs text-text truncate block">{entry.name}</span>
-                        <span className="text-[10px] text-text-muted truncate block">{entry.path}</span>
-                      </div>
-                      {entry.size != null && (
-                        <span className="text-[10px] text-text-muted shrink-0">{formatSize(entry.size)}</span>
-                      )}
-                    </div>
+                      entry={entry}
+                      depth={0}
+                      sessionId={sessionId}
+                      onView={setViewingFile}
+                      showPath
+                    />
                   ))}
                 </div>
               )}
@@ -300,11 +285,14 @@ function FileNode({
   depth,
   sessionId,
   onView,
+  showPath = false,
 }: {
   entry: FileEntry;
   depth: number;
   sessionId: string;
   onView: (file: { path: string; name: string; image?: boolean; media?: MediaKind }) => void;
+  /** Show the file's path under its name (search results) */
+  showPath?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileEntry[] | null>(null);
@@ -362,10 +350,13 @@ function FileNode({
           <a
             href={`/api/sessions/${encodeURIComponent(sessionId)}/download-folder?path=${encodeURIComponent(entry.path)}`}
             download={`${entry.name}.zip`}
-            className="shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity ml-auto"
+            className="shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ml-auto"
             aria-label={`Download ${entry.name} as zip`}
             title="Download as zip"
-            onClick={(e) => e.stopPropagation()}
+            onClick={saveDownloadOnClick(
+              `/api/sessions/${encodeURIComponent(sessionId)}/download-folder?path=${encodeURIComponent(entry.path)}`,
+              `${entry.name}.zip`,
+            )}
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -413,11 +404,18 @@ function FileNode({
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
       </svg>
-      <span className="text-xs text-text truncate">{entry.name}</span>
+      {showPath ? (
+        <div className="min-w-0 flex-1">
+          <span className="text-xs text-text truncate block">{entry.name}</span>
+          <span className="text-[10px] text-text-muted truncate block">{entry.path}</span>
+        </div>
+      ) : (
+        <span className="text-xs text-text truncate">{entry.name}</span>
+      )}
       {/* View button for viewable files */}
       {canView && (
         <button
-          className="shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity"
+          className="shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
           aria-label={`View ${entry.name}`}
           onClick={(e) => { e.stopPropagation(); onView({ path: entry.path, name: entry.name, image: canViewImage, media }); }}
         >
@@ -431,9 +429,9 @@ function FileNode({
       <a
         href={downloadUrl}
         download={entry.name}
-        className={`shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 transition-opacity ${canView ? '' : 'ml-auto'}`}
+        className={`shrink-0 p-0.5 rounded text-text-muted hover:text-primary opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${canView ? '' : 'ml-auto'}`}
         aria-label={`Download ${entry.name}`}
-        onClick={(e) => e.stopPropagation()}
+        onClick={saveDownloadOnClick(downloadUrl, entry.name)}
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -609,6 +607,7 @@ function FileViewer({
             <a
               href={downloadUrl}
               download={name}
+              onClick={saveDownloadOnClick(downloadUrl, name)}
               className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
@@ -782,6 +781,7 @@ function ImageViewer({
           <a
             href={imgUrl}
             download={name}
+            onClick={saveDownloadOnClick(imgUrl, name)}
             className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
@@ -908,6 +908,7 @@ function MediaViewer({
         <a
           href={downloadUrl}
           download={name}
+          onClick={saveDownloadOnClick(downloadUrl, name)}
           className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors shrink-0"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
