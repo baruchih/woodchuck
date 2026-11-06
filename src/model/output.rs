@@ -182,7 +182,11 @@ fn detect_codex_status(output: &str) -> SessionStatus {
         return SessionStatus::Working;
     }
 
-    let Some(input_box) = lines.iter().rposition(|l| l.trim_start().starts_with('›')) else {
+    // The input box starts with `›`, or `»` in the agents-mode layout
+    let Some(input_box) = lines
+        .iter()
+        .rposition(|l| l.trim_start().starts_with('›') || l.trim_start().starts_with('»'))
+    else {
         // No input box: starting up, or not Codex's UI at all
         return if lines.is_empty() { SessionStatus::Resting } else { SessionStatus::Working };
     };
@@ -706,6 +710,19 @@ Esc to cancel · Tab to amend"#;
             "• 9. I name every\n■ Conversation interrupted - use /feedback if something went wrong\n› Ask Codex to do anything\n{CODEX_FOOTER}"
         );
         assert_eq!(detect_status_for(Agent::Codex, &screen), SessionStatus::Resting);
+    }
+
+    #[test]
+    fn test_codex_finished_turn_agents_layout_is_resting() {
+        // `»` input box, blank line after "Worked for", agents footer
+        let screen = "• Yes—all intended code is committed and pushed.\n\n  • Branch: fix/stage6-review\n\n  Worked for 36s • Nov 5 at 13:45\n\n\n» Ask Codex to do anything\n\n  GPT-6-Astra ultra · ~/projects/elef-helper · Main [default]\n  ← for agents · ? for shortcuts\n";
+        assert_eq!(detect_status_for(Agent::Codex, screen), SessionStatus::Resting);
+    }
+
+    #[test]
+    fn test_codex_streaming_reply_agents_layout_is_working() {
+        let screen = "» Write a poem\n• 1. A cursor waits quietly.\n\n» Ask Codex to do anything\n  ← for agents · ? for shortcuts\n";
+        assert_eq!(detect_status_for(Agent::Codex, screen), SessionStatus::Working);
     }
 
     #[test]
