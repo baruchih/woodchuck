@@ -1,10 +1,13 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { SlashCommandMenu, useSlashCommandState } from './SlashCommandMenu';
+import { AttachmentChips } from './AttachmentChips';
+import type { Attachment } from '../utils/attachments';
 import { INPUT_MAX_BYTES, inputBytes } from '../utils/inputLimit';
 import type { Command } from '../types';
 
 interface MobileInputBarProps {
-  onSend: (text: string) => void;
+  /** Resolves false when sending failed, so the text is kept */
+  onSend: (text: string) => Promise<boolean | void> | void;
   onSendKey: (key: string) => void;
   onUploadImage: () => void;
   onUploadFiles: () => void;
@@ -16,6 +19,11 @@ interface MobileInputBarProps {
   onZoomOut: () => void;
   sending?: boolean;
   commands?: Command[];
+  /** Files staged to upload with the next message */
+  attachments?: Attachment[];
+  onRemoveAttachment?: (id: string) => void;
+  /** Files pasted into the text box */
+  onPasteFiles?: (files: File[]) => void;
 }
 
 export function MobileInputBar({
@@ -31,6 +39,9 @@ export function MobileInputBar({
   onZoomOut,
   sending,
   commands = [],
+  attachments = [],
+  onRemoveAttachment,
+  onPasteFiles,
 }: MobileInputBarProps) {
   const [text, setText] = useState('');
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
@@ -41,14 +52,26 @@ export function MobileInputBar({
   const inputByteCount = useMemo(() => inputBytes(text.trim()), [text]);
   const inputTooLong = inputByteCount > INPUT_MAX_BYTES;
 
-  const handleSend = useCallback(() => {
-    const trimmed = text.trim();
-    if (!trimmed || sending || inputTooLong) return;
-    onSend(trimmed);
-    setText('');
+  const canSend = (!!text.trim() || attachments.length > 0) && !sending && !inputTooLong;
+
+  const handleSend = useCallback(async () => {
+    if (!canSend) return;
+    const sent = text.trim();
+    const ok = await onSend(sent);
+    if (ok === false) return;
+    // Keep anything typed while the attachments were uploading
+    setText((current) => (current.trim() === sent ? '' : current));
     setSlashSelectedIndex(0);
     inputRef.current?.focus();
-  }, [text, sending, inputTooLong, onSend]);
+  }, [text, canSend, onSend]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    if (!onPasteFiles) return;
+    const files = Array.from(e.clipboardData.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    onPasteFiles(files);
+  }, [onPasteFiles]);
 
   const handleSlashSelect = useCallback((command: Command) => {
     const newText = command.name.startsWith('/') ? `${command.name} ` : `/${command.name} `;
@@ -130,6 +153,11 @@ export function MobileInputBar({
         </div>
       )}
 
+      {/* Staged attachments — uploaded when the message is sent */}
+      {onRemoveAttachment && (
+        <AttachmentChips attachments={attachments} onRemove={onRemoveAttachment} disabled={sending} />
+      )}
+
       {/* Text input row */}
       <div className="relative px-2 py-1.5 flex items-center gap-1.5">
         {/* Slash command autocomplete menu */}
@@ -145,7 +173,8 @@ export function MobileInputBar({
           type="button"
           onClick={onUploadImage}
           className="p-2 rounded-sm text-text-muted hover:text-primary btn-active shrink-0"
-          aria-label="Upload image"
+          aria-label="Attach image"
+          title="Attach image (uploads when you send)"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -158,7 +187,8 @@ export function MobileInputBar({
           type="button"
           onClick={onUploadFiles}
           className="p-2 rounded-sm text-text-muted hover:text-primary btn-active shrink-0"
-          aria-label="Upload files"
+          aria-label="Attach files"
+          title="Attach files (uploads when you send)"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -175,6 +205,7 @@ export function MobileInputBar({
           value={text}
           onChange={(e) => { setText(e.target.value); setSlashSelectedIndex(0); }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder="Type a message..."
           rows={1}
           className="flex-1 bg-background border border-border rounded-sm px-3 py-1.5 text-sm text-text placeholder:text-text-muted focus:outline-none focus:border-primary resize-none overflow-hidden"
@@ -186,7 +217,7 @@ export function MobileInputBar({
         <button
           type="button"
           onClick={handleSend}
-          disabled={!text.trim() || sending || inputTooLong}
+          disabled={!canSend}
           className="p-2 rounded-sm text-primary disabled:opacity-30 btn-active shrink-0"
           aria-label="Send"
         >

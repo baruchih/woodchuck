@@ -3,11 +3,13 @@ import { XtermTerminal } from './XtermTerminal';
 import { SessionInfoSheet } from './SessionInfoSheet';
 import { SlashCommandMenu, useSlashCommandState } from './SlashCommandMenu';
 import { UploadStatus, useUploadStatus } from './UploadStatus';
+import { AttachmentChips } from './AttachmentChips';
 import { FileBrowser } from './FileBrowser';
 import { useSessionOutput } from '../hooks/useSessionOutput';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
 import { useCommands } from '../hooks/useCommands';
 import { useSessions } from '../hooks/useSessions';
+import { useAttachments, uploadAndCompose } from '../hooks/useAttachments';
 import { useWS } from '../context/WebSocketContext';
 import { INPUT_MAX_BYTES, inputBytes } from '../utils/inputLimit';
 import type { Session, Command } from '../types';
@@ -21,7 +23,7 @@ interface SessionPaneProps {
 }
 
 export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove }: SessionPaneProps) {
-  const { sendInput, uploadFiles, getSession, deleteSession, renameSession, moveToProject } = useSessions();
+  const { sendInput, uploadImage, uploadFiles, getSession, deleteSession, renameSession, moveToProject } = useSessions();
   const { resize, sendRawInput } = useWS();
   const { needsAttention, triggerFastPoll, notifySentText, forceRefresh, onScreenChange } = useSessionOutput({ sessionId });
   const { fontSize, zoomIn, zoomOut } = useTerminalFontSize();
@@ -31,6 +33,8 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const { commands } = useCommands(sessionId);
   const { showMenu: showSlashMenu, filteredCommands } = useSlashCommandState(inputText, commands);
   const { uploadStatus, setUploading, setUploadProgress, setUploadResult } = useUploadStatus();
+  // Files picked or pasted into the input, uploaded when the message is sent
+  const { attachments, addAttachments, removeAttachment } = useAttachments();
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showInfoSheet, setShowInfoSheet] = useState(false);
   const [infoSession, setInfoSession] = useState<Session | null>(null);
@@ -60,21 +64,44 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
   const inputByteCount = useMemo(() => inputBytes(inputText.trim()), [inputText]);
   const inputTooLong = inputByteCount > INPUT_MAX_BYTES;
 
+  const canSend = (!!inputText.trim() || attachments.length > 0) && !sending && !inputTooLong;
+
   const handleSend = useCallback(async () => {
+    if (!canSend) return;
     const trimmed = inputText.trim();
-    if (!trimmed || sending || inputTooLong) return;
+    const staged = attachments;
     setSending(true);
     try {
-      await sendInput(sessionId, trimmed);
-      setInputText('');
+      let msg = trimmed;
+      if (staged.length > 0) {
+        setUploading(true);
+        msg = await uploadAndCompose(sessionId, trimmed, staged, { uploadImage, uploadFiles }, setUploadProgress);
+      }
+      await sendInput(sessionId, msg);
+      // Keep anything typed while the attachments were uploading
+      setInputText((current) => (current.trim() === trimmed ? '' : current));
       triggerFastPoll();
-      notifySentText(trimmed);
+      notifySentText(staged.length > 0 ? `${trimmed} [${staged.length} attached]`.trim() : trimmed);
+      if (staged.length > 0) {
+        setUploadResult('success', `Sent with ${staged.length} attachment${staged.length > 1 ? 's' : ''}`);
+        staged.forEach((a) => removeAttachment(a.id));
+      }
     } catch (err) {
       console.error('Failed to send input:', err);
+      if (staged.length > 0) {
+        setUploadResult('error', err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
+      }
     } finally {
       setSending(false);
     }
-  }, [inputText, sending, inputTooLong, sessionId, sendInput, triggerFastPoll, notifySentText]);
+  }, [canSend, inputText, attachments, sessionId, uploadImage, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult, removeAttachment]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    addAttachments(files);
+  }, [addAttachments]);
 
   const handleSlashSelect = useCallback((command: Command) => {
     const newText = command.name.startsWith('/') ? `${command.name} ` : `/${command.name} `;
@@ -131,27 +158,11 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
     filesInputRef.current?.click();
   }, []);
 
-  const handleFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || uploadStatus.uploading) return;
-
-    setUploading(true);
-    try {
-      const paths = await uploadFiles(sessionId, files, setUploadProgress);
-      const msg = paths.length === 1
-        ? `I uploaded a file to the session uploads folder: ${paths[0]}`
-        : `I uploaded ${paths.length} files to the session uploads folder: ${paths.join(' ')}`;
-      await sendInput(sessionId, msg);
-      triggerFastPoll();
-      notifySentText(`[uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}]`);
-      setUploadResult('success', `Uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}`);
-    } catch (err) {
-      console.error('Failed to upload files:', err);
-      setUploadResult('error', err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
-    } finally {
-      if (filesInputRef.current) filesInputRef.current.value = '';
-    }
-  }, [sessionId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
+  // Stage the picked files; they upload when the message is sent
+  const handleFilesSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) addAttachments(e.target.files);
+    e.target.value = '';
+  }, [addAttachments]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -232,6 +243,13 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         </div>
       )}
 
+      {/* Staged attachments */}
+      {attachments.length > 0 && (
+        <div className="bg-surface border-t border-border shrink-0">
+          <AttachmentChips attachments={attachments} onRemove={removeAttachment} disabled={sending} compact />
+        </div>
+      )}
+
       {/* Compact input bar */}
       <div className="relative flex items-start gap-1 px-1.5 py-1 bg-surface border-t border-border shrink-0">
         <SlashCommandMenu
@@ -243,10 +261,10 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         />
         <button
           onClick={(e) => { e.stopPropagation(); handleUploadFiles(); }}
-          disabled={uploadStatus.uploading}
+          disabled={sending}
           className="text-text-muted hover:text-primary disabled:opacity-30 px-0.5 py-0.5 mt-0.5 shrink-0"
-          aria-label="Upload files"
-          title="Upload files"
+          aria-label="Attach files"
+          title="Attach files (uploads when you send)"
         >
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -261,6 +279,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
           value={inputText}
           onChange={(e) => { setInputText(e.target.value); setSlashSelectedIndex(0); }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onFocus={onFocus}
           placeholder={focused ? 'Type here...' : 'Click to focus'}
           rows={1}
@@ -269,7 +288,7 @@ export function SessionPane({ sessionId, sessionName, focused, onFocus, onRemove
         />
         <button
           onClick={handleSend}
-          disabled={!inputText.trim() || sending || inputTooLong}
+          disabled={!canSend}
           className="text-[10px] font-medium text-primary disabled:opacity-30 px-1.5 py-0.5 mt-0.5"
         >
           Send

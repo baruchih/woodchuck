@@ -15,6 +15,7 @@ import { FileBrowser } from '../components/FileBrowser';
 import { ShellPanel } from '../components/ShellPanel';
 import { api } from '../api/client';
 import { useSessions } from '../hooks/useSessions';
+import { useAttachments, uploadAndCompose } from '../hooks/useAttachments';
 import { useProjects } from '../hooks/useProjects';
 import { useSessionOutput } from '../hooks/useSessionOutput';
 import { useTerminalFontSize } from '../hooks/useTerminalFontSize';
@@ -58,6 +59,9 @@ export function SessionPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
   const { uploadStatus, setUploading, setUploadProgress, setUploadResult } = useUploadStatus();
+  // Files picked or pasted into the input bar, uploaded when the message is sent
+  const { attachments, addAttachments, removeAttachment, clearAttachments } = useAttachments();
+  useEffect(() => { clearAttachments(); }, [decodedId, clearAttachments]);
 
   // Detect mobile (touch device with narrow screen)
   const isMobile = 'ontouchstart' in window && window.innerWidth < 768;
@@ -255,87 +259,59 @@ export function SessionPage() {
     setShowKillConfirm(true);
   }, []);
 
-  // Mobile input bar: send text as input
-  const handleMobileSend = useCallback(async (text: string) => {
-    if (!decodedId || sending) return;
+  // Mobile input bar: upload any attachments, then send the text with their paths
+  const handleMobileSend = useCallback(async (text: string): Promise<boolean> => {
+    if (!decodedId || sending) return false;
     setSending(true);
+    const staged = attachments;
     try {
-      await sendInput(decodedId, text);
+      let msg = text;
+      if (staged.length > 0) {
+        setUploading(true);
+        msg = await uploadAndCompose(decodedId, text, staged, { uploadImage, uploadFiles }, setUploadProgress);
+      }
+      await sendInput(decodedId, msg);
       triggerFastPoll();
-      notifySentText(text);
+      notifySentText(staged.length > 0 ? `${text} [${staged.length} attached]`.trim() : text);
+      if (staged.length > 0) {
+        setUploadResult('success', `Sent with ${staged.length} attachment${staged.length > 1 ? 's' : ''}`);
+        const sentIds = new Set(staged.map((a) => a.id));
+        sentIds.forEach(removeAttachment);
+      }
+      return true;
     } catch (err) {
       console.error('Failed to send input:', err);
+      if (staged.length > 0) {
+        setUploadResult('error', err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
+      }
+      return false;
     } finally {
       setSending(false);
     }
-  }, [decodedId, sending, sendInput, triggerFastPoll, notifySentText]);
+  }, [decodedId, sending, attachments, uploadImage, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult, removeAttachment]);
 
   // Image upload: open file picker
   const handleUploadImage = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
 
-  // Image upload: handle file selection (supports multiple)
-  const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || !decodedId || uploadStatus.uploading) return;
-
-    setUploading(true);
-    try {
-      const paths: string[] = [];
-      const fileArr = Array.from(files);
-      for (let i = 0; i < fileArr.length; i++) {
-        const path = await uploadImage(decodedId, fileArr[i], (pct) => {
-          // Scale progress across multiple files
-          const filePct = Math.round(((i + pct / 100) / fileArr.length) * 100);
-          setUploadProgress(filePct);
-        });
-        paths.push(path);
-      }
-      // Send all file paths as input so Claude Code can read them
-      const msg = paths.length === 1
-        ? `see this image: ${paths[0]}`
-        : `see these images: ${paths.join(' ')}`;
-      await sendInput(decodedId, msg);
-      triggerFastPoll();
-      notifySentText(`[uploaded ${paths.length} image${paths.length > 1 ? 's' : ''}]`);
-      setUploadResult('success', `Uploaded ${paths.length} image${paths.length > 1 ? 's' : ''}`);
-    } catch (err) {
-      console.error('Failed to upload image:', err);
-      setUploadResult('error', 'Image upload failed');
-    } finally {
-      // Reset the input so the same files can be selected again
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  }, [decodedId, uploadStatus.uploading, uploadImage, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
+  // Image picker: stage the images; they upload when the message is sent
+  const handleFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) addAttachments(e.target.files, true);
+    // Reset the input so the same files can be selected again
+    e.target.value = '';
+  }, [addAttachments]);
 
   // File upload: open file picker
   const handleUploadFiles = useCallback(() => {
     filesInputRef.current?.click();
   }, []);
 
-  // File upload: handle file selection
-  const handleFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0 || !decodedId || uploadStatus.uploading) return;
-
-    setUploading(true);
-    try {
-      const paths = await uploadFiles(decodedId, files, setUploadProgress);
-      const msg = paths.length === 1
-        ? `I uploaded a file to the session uploads folder: ${paths[0]}`
-        : `I uploaded ${paths.length} files to the session uploads folder: ${paths.join(' ')}`;
-      await sendInput(decodedId, msg);
-      triggerFastPoll();
-      notifySentText(`[uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}]`);
-      setUploadResult('success', `Uploaded ${paths.length} file${paths.length > 1 ? 's' : ''}`);
-    } catch (err) {
-      console.error('Failed to upload files:', err);
-      setUploadResult('error', err instanceof Error ? `Upload failed: ${err.message}` : 'Upload failed');
-    } finally {
-      if (filesInputRef.current) filesInputRef.current.value = '';
-    }
-  }, [decodedId, uploadStatus.uploading, uploadFiles, sendInput, triggerFastPoll, notifySentText, setUploading, setUploadProgress, setUploadResult]);
+  // File picker: stage the files; they upload when the message is sent
+  const handleFilesSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) addAttachments(e.target.files, false);
+    e.target.value = '';
+  }, [addAttachments]);
 
   // Refresh terminal — resubscribes, which sends a fresh snapshot
   const handleRefresh = useCallback(() => {
@@ -478,6 +454,9 @@ export function SessionPage() {
             onZoomOut={zoomOut}
             sending={sending}
             commands={commands}
+            attachments={attachments}
+            onRemoveAttachment={removeAttachment}
+            onPasteFiles={addAttachments}
           />
 
           {/* Typing preview bar with slash command menu — overlays the claude input bar */}
