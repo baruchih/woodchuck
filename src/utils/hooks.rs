@@ -37,6 +37,9 @@ fn validate_external_url(url: &str) -> Result<(), ModelError> {
 
 /// Generate the hook script content with the given external URL
 fn generate_hook_script(external_url: &str) -> String {
+    // The server's certificate names its public host, not the loopback address,
+    // so skip verification for a loopback https URL (the traffic never leaves the machine)
+    let insecure = if is_loopback_https(external_url) { "  --insecure \\\n" } else { "" };
     format!(
         r#"#!/bin/bash
 # Woodchuck hook script - reports Claude Code events to the backend
@@ -79,13 +82,20 @@ curl -s -X POST \
   "${{WOODCHUCK_URL}}/api/sessions/${{SESSION_ID}}/hook" \
   -H "Content-Type: application/json" \
   -d "{{\\"event\\": \\"${{HOOK_EVENT}}\\"}}" \
-  --max-time 2 \
+{insecure}  --max-time 2 \
   >/dev/null 2>&1 &
 
 exit 0
 "#,
-        external_url = external_url
+        external_url = external_url,
+        insecure = insecure,
     )
+}
+
+fn is_loopback_https(url: &str) -> bool {
+    ["https://127.0.0.1:", "https://localhost:", "https://[::1]:"]
+        .iter()
+        .any(|prefix| url.starts_with(prefix))
 }
 
 /// Ensure the hook script exists at `<project_folder>/.claude/woodchuck-hook.sh`
@@ -340,6 +350,14 @@ async fn inject_inbox_instructions(claude_dir: &Path, external_url: &str) -> Res
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_hook_script_skips_cert_check_only_for_loopback_https() {
+        let local = super::generate_hook_script("https://127.0.0.1:1212");
+        assert!(local.contains("  --insecure \\\n  --max-time 2"));
+        assert!(!super::generate_hook_script("http://127.0.0.1:3000").contains("--insecure"));
+        assert!(!super::generate_hook_script("https://box.tail1234.ts.net:1212").contains("--insecure"));
+    }
+
     use super::*;
     use tempfile::TempDir;
 

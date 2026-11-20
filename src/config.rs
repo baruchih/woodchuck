@@ -75,7 +75,7 @@ pub struct Config {
     pub tls_key: Option<String>,
 
     /// External URL for the Woodchuck server (used by hooks)
-    /// Defaults to http://localhost:{http_port}
+    /// Defaults to this server on the loopback address (see `default_external_url`)
     pub external_url: String,
 }
 
@@ -98,9 +98,12 @@ impl Config {
 
         let http_port: u16 = parse_env_or_default("HTTP_PORT", 3000)?;
 
-        // External URL defaults to http://localhost:{http_port}
-        let external_url = env::var("WOODCHUCK_EXTERNAL_URL")
-            .unwrap_or_else(|_| format!("http://localhost:{}", http_port));
+        let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0".to_string());
+        let tls_cert = optional_env("TLS_CERT");
+        let tls_key = optional_env("TLS_KEY");
+        let external_url = env::var("WOODCHUCK_EXTERNAL_URL").unwrap_or_else(|_| {
+            default_external_url(&bind_addr, http_port, tls_cert.is_some() && tls_key.is_some())
+        });
 
         Ok(Self {
             http_port,
@@ -115,9 +118,9 @@ impl Config {
             shutdown_timeout_secs: parse_env_or_default("SHUTDOWN_TIMEOUT_SECS", 5)?,
             static_dir: env::var("STATIC_DIR").unwrap_or_else(|_| "app/dist".to_string()),
             cors_origins: env::var("CORS_ORIGINS").unwrap_or_else(|_| "*".to_string()),
-            bind_addr: env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0".to_string()),
-            tls_cert: optional_env("TLS_CERT"),
-            tls_key: optional_env("TLS_KEY"),
+            bind_addr,
+            tls_cert,
+            tls_key,
             external_url,
         })
     }
@@ -141,6 +144,19 @@ impl Config {
 // =============================================================================
 // Helpers
 // =============================================================================
+
+/// How processes on this machine (the Claude hooks) reach the server. A fixed IPv4
+/// address, not `localhost`, so another app listening on the IPv6 side of the same
+/// port can't intercept them; https when the server only speaks TLS.
+fn default_external_url(bind_addr: &str, http_port: u16, tls: bool) -> String {
+    let host = match bind_addr {
+        "0.0.0.0" | "::" | "" => "127.0.0.1".to_string(),
+        addr if addr.contains(':') => format!("[{}]", addr),
+        addr => addr.to_string(),
+    };
+    let scheme = if tls { "https" } else { "http" };
+    format!("{}://{}:{}", scheme, host, http_port)
+}
 
 fn optional_env(name: &str) -> Option<String> {
     env::var(name).ok().filter(|s| !s.is_empty())
@@ -166,6 +182,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_default_external_url() {
+        use super::default_external_url;
+        assert_eq!(default_external_url("0.0.0.0", 1212, true), "https://127.0.0.1:1212");
+        assert_eq!(default_external_url("0.0.0.0", 3000, false), "http://127.0.0.1:3000");
+        assert_eq!(default_external_url("100.64.0.5", 1212, true), "https://100.64.0.5:1212");
+        assert_eq!(default_external_url("::1", 1212, false), "http://[::1]:1212");
+    }
+
     use super::*;
 
     #[test]
