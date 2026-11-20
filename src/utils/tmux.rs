@@ -10,6 +10,34 @@ use tracing::{debug, instrument};
 use crate::model::error::ModelError;
 use crate::model::types::TmuxSessionInfo;
 
+/// Woodchuck's own settings (see `Config::from_env`). The tmux server inherits
+/// them when Woodchuck starts it, so they would leak into every session shell —
+/// generic names like HTTP_PORT get picked up by apps run there, and some are secrets.
+const WOODCHUCK_ENV_VARS: &[&str] = &[
+    "BIND_ADDR",
+    "CORS_ORIGINS",
+    "DATA_DIR",
+    "HTTP_PORT",
+    "LOG_LEVEL",
+    "NTFY_SERVER",
+    "NTFY_TOPIC",
+    "PROJECTS_DIR",
+    "SHUTDOWN_TIMEOUT_SECS",
+    "STATIC_DIR",
+    "TLS_CERT",
+    "TLS_KEY",
+    "VAPID_PRIVATE_KEY",
+    "VAPID_PUBLIC_KEY",
+    "WOODCHUCK_EXTERNAL_URL",
+    "WS_PORT",
+];
+
+/// The shell command a session runs: a login+interactive shell without Woodchuck's settings
+fn session_shell_command(shell: &str, cmd: &str) -> String {
+    let unset: String = WOODCHUCK_ENV_VARS.iter().map(|v| format!("-u {} ", v)).collect();
+    format!("env {}{} -lic '{}'", unset, shell, cmd.replace('\'', "'\\''"))
+}
+
 /// Trait for tmux operations
 ///
 /// Abstracts tmux commands for testability.
@@ -104,7 +132,7 @@ impl TmuxClient for Tmux {
         // The -lic flags: -l (login), -i (interactive), -c (command)
         // This matches wolfpack's approach and is essential for commands like claude
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        let shell_cmd = format!("{} -lic '{}'", shell, cmd.replace('\'', "'\\''"));
+        let shell_cmd = session_shell_command(&shell, cmd);
 
         // Set CLAUDE_SESSION_ID environment variable for the hook script
         let env_var = format!("CLAUDE_SESSION_ID={}", name);
@@ -131,6 +159,16 @@ impl TmuxClient for Tmux {
 
         if output.status.success() {
             debug!(session = %name, "Created tmux session");
+            // Also drop them from the server's global environment, which new windows
+            // in any session start from. Best effort: failing here is harmless.
+            let mut args: Vec<&str> = Vec::new();
+            for (i, var) in WOODCHUCK_ENV_VARS.iter().enumerate() {
+                if i > 0 {
+                    args.push(";");
+                }
+                args.extend(["set-environment", "-g", "-u", var]);
+            }
+            let _ = Command::new("tmux").args(&args).output().await;
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -584,6 +622,15 @@ pub mod mock {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_session_shell_command_drops_woodchuck_env() {
+        let cmd = super::session_shell_command("/bin/zsh", "claude 'hi'");
+        assert!(cmd.starts_with("env -u BIND_ADDR "));
+        assert!(cmd.contains("-u HTTP_PORT "));
+        assert!(cmd.contains("-u VAPID_PRIVATE_KEY "));
+        assert!(cmd.ends_with(r#"/bin/zsh -lic 'claude '\''hi'\'''"#));
+    }
+
     use super::*;
 
     #[test]
