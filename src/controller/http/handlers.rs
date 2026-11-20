@@ -2105,6 +2105,7 @@ pub async fn list_orphaned_handler(
             !live_ids.contains(id)
                 && ps.folder.is_some()
                 && id.as_str() != crate::controller::maintainer::MAINTAINER_SESSION_ID
+                && !id.ends_with("_shell")
         })
         .map(|(id, ps)| OrphanedSessionData {
             id,
@@ -2128,6 +2129,7 @@ pub async fn recover_session_handler(
     // Load the persisted state for this session
     let persisted_states = state.session_store.load().await.map_err(err)?;
     let persisted = persisted_states.get(&session_id)
+        .filter(|_| !session_id.ends_with("_shell"))
         .ok_or_else(|| err_msg(StatusCode::NOT_FOUND, "Orphaned session not found", "SESSION_NOT_FOUND"))?;
 
     let folder = persisted.folder.as_ref()

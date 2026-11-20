@@ -325,6 +325,8 @@ async fn initialize_session_states(
             !active_ids.contains(id)
                 && ps.folder.is_some()
                 && id.as_str() != maintainer::MAINTAINER_SESSION_ID
+                // Shell panels are throwaway, not sessions to restore
+                && !id.ends_with("_shell")
         })
         .map(|(id, _)| id.clone())
         .collect();

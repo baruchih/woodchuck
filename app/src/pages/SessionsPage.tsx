@@ -6,6 +6,7 @@ import { Layout } from '../components/Layout';
 import { PullToRefresh } from '../components/PullToRefresh';
 import { Button } from '../components/Button';
 import { NotificationBanner } from '../components/NotificationBanner';
+import { RestoreSessionsBanner } from '../components/RestoreSessionsBanner';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LogoWatermark } from '../components/LogoWatermark';
 import { SessionInfoSheet } from '../components/SessionInfoSheet';
@@ -721,6 +722,9 @@ export function SessionsPage() {
             onDismiss={handleDismiss}
             onTap={handleBannerTap}
           />
+
+          {/* Sessions lost in a crash, offered for restore */}
+          <RestoreSessionsBanner onRestored={refreshSessions} />
 
           <div className="p-4">
             {/* Search input */}

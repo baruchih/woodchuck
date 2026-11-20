@@ -476,6 +476,13 @@ async fn cleanup_dead_sessions(
         let states = session_states.read().await;
         states.keys().cloned().collect()
     };
+    if tracked_ids.is_empty() {
+        return;
+    }
+
+    // No sessions at all means the tmux server itself went away (a crash, or the
+    // Mac logging out). Keep those sessions in the store so they can be restored.
+    let server_gone = matches!(tmux.list_sessions().await, Ok(live) if live.is_empty());
 
     for session_id in tracked_ids {
         match tmux.has_session(&session_id).await {
@@ -502,8 +509,11 @@ async fn cleanup_dead_sessions(
                     states.remove(&session_id);
                 }
 
-                // Remove from persistent store (normal shutdown — not a crash orphan)
-                if let Err(e) = session_store.remove(&session_id).await {
+                // A session that ended on its own is gone for good; one lost with the
+                // tmux server stays in the store as a crash orphan (shells are never kept)
+                if server_gone && !session_id.ends_with("_shell") {
+                    info!(session = %session_id, "tmux server gone, keeping session for restore");
+                } else if let Err(e) = session_store.remove(&session_id).await {
                     warn!(session = %session_id, error = %e, "Failed to remove ended session from store");
                 }
 
@@ -547,6 +557,72 @@ async fn cleanup_empty_subscribers(subscribers: &SubscriberMap) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn cleanup_fixture(
+        live: &[&str],
+        tracked: &[&str],
+    ) -> (Arc<dyn TmuxClient>, SharedSessionStates, Arc<dyn SessionStore>, tempfile::TempDir) {
+        use crate::utils::tmux::mock::MockTmux;
+        use crate::utils::{JsonSessionStore, PersistedSessionState};
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = crate::config::Config {
+            http_port: 3000,
+            ws_port: 3001,
+            log_level: "info".to_string(),
+            projects_dir: "/tmp/projects".to_string(),
+            data_dir: dir.path().to_string_lossy().to_string(),
+            ntfy_server: None,
+            ntfy_topic: None,
+            vapid_private_key: None,
+            vapid_public_key: None,
+            shutdown_timeout_secs: 5,
+            static_dir: "app/dist".to_string(),
+            cors_origins: "*".to_string(),
+            bind_addr: "0.0.0.0".to_string(),
+            tls_cert: None,
+            tls_key: None,
+            external_url: "http://127.0.0.1:3000".to_string(),
+        };
+        let store: Arc<dyn SessionStore> = Arc::new(JsonSessionStore::new(&config).await.unwrap());
+        let tmux = MockTmux::new();
+        for id in live {
+            tmux.add_session(id, "").await;
+        }
+        let states: SharedSessionStates = Arc::new(RwLock::new(HashMap::new()));
+        for id in tracked {
+            let mut ps = PersistedSessionState::with_name(id.to_string());
+            ps.folder = Some("/tmp/proj".to_string());
+            store.save(id, &ps).await.unwrap();
+            states.write().await.insert(id.to_string(), crate::model::SessionState::from_persisted(ps));
+        }
+        (Arc::new(tmux), states, store, dir)
+    }
+
+    async fn run_cleanup(tmux: &Arc<dyn TmuxClient>, states: &SharedSessionStates, store: &Arc<dyn SessionStore>) {
+        let subs: SubscriberMap = Arc::new(RwLock::new(HashMap::new()));
+        let (tx, _rx) = tokio::sync::broadcast::channel(16);
+        cleanup_dead_sessions(tmux, states, &subs, store, &tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_session_that_ends_is_removed_from_store() {
+        let (tmux, states, store, _dir) = cleanup_fixture(&["a"], &["a", "b"]).await;
+        run_cleanup(&tmux, &states, &store).await;
+        let persisted = store.load().await.unwrap();
+        assert!(persisted.contains_key("a"));
+        assert!(!persisted.contains_key("b"));
+        assert!(!states.read().await.contains_key("b"));
+    }
+
+    #[tokio::test]
+    async fn test_sessions_lost_with_tmux_server_are_kept_for_restore() {
+        let (tmux, states, store, _dir) = cleanup_fixture(&[], &["a", "b", "a_shell"]).await;
+        run_cleanup(&tmux, &states, &store).await;
+        let persisted = store.load().await.unwrap();
+        assert!(persisted.contains_key("a") && persisted.contains_key("b"));
+        assert!(!persisted.contains_key("a_shell"));
+        assert!(states.read().await.is_empty());
+    }
 
     fn make_test_msg(id: &str) -> ServerMessage {
         ServerMessage::Status {
