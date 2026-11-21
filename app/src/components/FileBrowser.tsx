@@ -4,6 +4,7 @@ import { api } from '../api/client';
 import { buildPreviewHtml } from '../utils/htmlPreview';
 import { saveDownloadOnClick } from '../utils/saveDownload';
 import { ShareButton } from './ShareButton';
+import { SaveToDriveButton } from './SaveToDriveButton';
 import type { FileEntry } from '../types';
 
 interface FileBrowserProps {
@@ -375,6 +376,7 @@ function FileNode({
             name={`${entry.name}.zip`}
             className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
           />
+          <SaveToDriveButton asSpan sessionId={sessionId} path={entry.path} name={entry.name} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100" />
           {loading && (
             <svg className="w-3 h-3 animate-spin text-text-muted ml-auto shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -454,6 +456,7 @@ function FileNode({
       {(entry.size == null || entry.size <= MAX_SHARE_SIZE) && (
         <ShareButton url={downloadUrl} name={entry.name} isText={isViewable(entry.name)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100" />
       )}
+      <SaveToDriveButton sessionId={sessionId} path={entry.path} name={entry.name} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100" />
       {entry.size != null && (
         <span className="text-[10px] text-text-muted shrink-0">{formatSize(entry.size)}</span>
       )}
@@ -635,6 +638,7 @@ function FileViewer({
               <span className="hidden sm:inline">Download</span>
             </a>
             <ShareButton url={downloadUrl} name={name} isText variant="labeled" />
+            <SaveToDriveButton sessionId={sessionId} path={path} name={name} variant="labeled" />
           </div>
         </div>
       </div>
@@ -812,6 +816,7 @@ function ImageViewer({
             <span className="hidden sm:inline">Download</span>
           </a>
           <ShareButton url={imgUrl} name={name} variant="labeled" />
+          <SaveToDriveButton sessionId={sessionId} path={path} name={name} variant="labeled" />
         </div>
       </div>
 
@@ -941,6 +946,7 @@ function MediaViewer({
             Download
           </a>
           <ShareButton url={downloadUrl} name={name} variant="labeled" />
+          <SaveToDriveButton sessionId={sessionId} path={path} name={name} variant="labeled" />
         </div>
       </div>
 

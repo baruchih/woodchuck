@@ -1,4 +1,4 @@
-import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeploySettings, DeployHistoryData, DeployTriggerResult, DeployAbortResult, SessionFilesData, FileContentData, OrphanedSession } from '../types';
+import type { Session, SessionWithOutput, CreateSessionParams, PollData, ResizeParams, CreateFolderParams, CreateFolderResponse, PushSubscriptionJSON, Command, Project, Template, MaintainerStatus, InboxSubmission, DeployStatus, DeploySettings, DeployHistoryData, DeployTriggerResult, DeployAbortResult, SessionFilesData, FileContentData, OrphanedSession, DriveStatus, SavedToDrive } from '../types';
 
 const BASE_URL = '/api';
 
@@ -163,6 +163,14 @@ export const api = {
 
   searchSessionFiles: (id: string, query: string): Promise<SessionFilesData> =>
     request(`/sessions/${encodeURIComponent(id)}/files?search=${encodeURIComponent(query)}`),
+
+  getDriveStatus: (): Promise<DriveStatus> => request('/drive/status'),
+
+  saveToDrive: (id: string, path: string): Promise<SavedToDrive> =>
+    request(`/sessions/${encodeURIComponent(id)}/save-to-drive`, {
+      method: 'POST',
+      body: JSON.stringify({ path }),
+    }),
 
   getFileContent: (id: string, path: string): Promise<FileContentData> =>
     request(`/sessions/${encodeURIComponent(id)}/file-content?path=${encodeURIComponent(path)}`),

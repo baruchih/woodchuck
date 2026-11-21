@@ -8,6 +8,7 @@
 
 pub mod deploy;
 pub mod deploy_settings;
+pub mod drive;
 pub mod http;
 pub mod maintainer;
 pub mod poller;

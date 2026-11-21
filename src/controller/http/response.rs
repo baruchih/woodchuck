@@ -400,6 +400,22 @@ pub struct FileEntry {
     pub children: Option<Vec<FileEntry>>,
 }
 
+/// Whether Save to Drive is set up
+#[derive(Debug, Serialize)]
+pub struct DriveStatusData {
+    pub available: bool,
+    pub destination: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Result of saving a file or folder to Drive
+#[derive(Debug, Serialize)]
+pub struct SavedToDriveData {
+    /// rclone path it was saved to, e.g. "gdrive:Woodchuck/project/notes.md"
+    pub saved_to: String,
+}
+
 /// Session files listing response
 #[derive(Debug, Serialize)]
 pub struct SessionFilesData {

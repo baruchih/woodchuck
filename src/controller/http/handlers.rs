@@ -14,13 +14,13 @@ use tracing::{debug, info, instrument, warn};
 use super::response::{
     err, err_msg, ApiResponse, CommandsData, DeployAbortData, DeployEventResponse,
     DeployHistoryData, DeploySettingsData, DeployStatusData, DeployTriggerData,
-    DiscardedSessionData, FileContentData, FileEntry, FolderCreatedData, FoldersData, HealthData,
+    DiscardedSessionData, DriveStatusData, FileContentData, FileEntry, FolderCreatedData, FoldersData, HealthData,
     HookData, InboxItemData, InputSentData, MaintainerStatusData, OrphanedSessionData,
     OrphanedSessionsData, PollData, ProjectCreatedData, ProjectDeletedData, ProjectRenamedData,
     ProjectsData, PushSubscribedData, PushUnsubscribedData, RecoveredSessionData, ResizeData,
     SessionCreatedData, SessionData, SessionFilesData, SessionKilledData, SessionUpdatedData, ShellData,
     SessionsData, TemplateData, TemplateDeletedData, TemplatesListData, UploadProjectData,
-    UploadedFilesData, UploadedImageData, VapidKeyData,
+    SavedToDriveData, UploadedFilesData, UploadedImageData, VapidKeyData,
 };
 use super::state::AppState;
 
@@ -1789,6 +1789,19 @@ async fn resolve_session_file(
     session_id: &str,
     path: &str,
 ) -> Result<std::path::PathBuf, (StatusCode, Json<ApiResponse<()>>)> {
+    let canonical = resolve_session_path(state, session_id, path).await?;
+    if canonical.is_dir() {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Cannot download a directory", "INVALID_INPUT"));
+    }
+    Ok(canonical)
+}
+
+/// Resolve a file or folder inside the session's project folder (no path traversal)
+async fn resolve_session_path(
+    state: &AppState,
+    session_id: &str,
+    path: &str,
+) -> Result<std::path::PathBuf, (StatusCode, Json<ApiResponse<()>>)> {
     let session = crate::model::get_session(state.tmux.as_ref(), session_id)
         .await
         .map_err(err)?;
@@ -1811,11 +1824,50 @@ async fn resolve_session_file(
         return Err(err_msg(StatusCode::FORBIDDEN, "Path outside session folder", "FORBIDDEN"));
     }
 
-    if canonical.is_dir() {
-        return Err(err_msg(StatusCode::BAD_REQUEST, "Cannot download a directory", "INVALID_INPUT"));
-    }
-
     Ok(canonical)
+}
+
+/// GET /drive/status — whether Save to Drive is set up
+pub async fn drive_status_handler() -> Json<ApiResponse<DriveStatusData>> {
+    let status = crate::controller::drive::status().await;
+    ApiResponse::ok(DriveStatusData {
+        available: status.available,
+        destination: status.destination,
+        reason: status.reason,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SaveToDriveParams {
+    pub path: String,
+}
+
+/// POST /sessions/:id/save-to-drive — upload a file or folder from the session to Drive
+#[instrument(skip(state))]
+pub async fn save_to_drive_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Json(params): Json<SaveToDriveParams>,
+) -> Result<Json<ApiResponse<SavedToDriveData>>, (StatusCode, Json<ApiResponse<()>>)> {
+    let canonical = resolve_session_path(&state, &session_id, &params.path).await?;
+    let session = crate::model::get_session(state.tmux.as_ref(), &session_id)
+        .await
+        .map_err(err)?;
+    let root = std::path::Path::new(&session.folder);
+    // Not the whole project, only files and subfolders in it
+    if root.canonicalize().map(|r| r == canonical).unwrap_or(false) {
+        return Err(err_msg(StatusCode::BAD_REQUEST, "Pick a file or a subfolder", "INVALID_INPUT"));
+    }
+    // Group uploads by project folder name
+    let project = root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "project".to_string());
+
+    let saved_to = crate::controller::drive::upload(&canonical, &project)
+        .await
+        .map_err(|e| err_msg(StatusCode::BAD_GATEWAY, &format!("Save to Drive failed: {e}"), "DRIVE_ERROR"))?;
+    Ok(ApiResponse::ok(SavedToDriveData { saved_to }))
 }
 
 /// GET /sessions/:id/download?path=relative/path — serve a file from the session's project folder

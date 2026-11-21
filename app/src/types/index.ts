@@ -328,6 +328,19 @@ export interface FileEntry {
   children?: FileEntry[];
 }
 
+export interface DriveStatus {
+  available: boolean;
+  /** rclone destination, e.g. "gdrive:Woodchuck" */
+  destination: string;
+  /** Why it isn't available */
+  reason?: string;
+}
+
+export interface SavedToDrive {
+  /** rclone path, e.g. "gdrive:Woodchuck/project/notes.md" */
+  saved_to: string;
+}
+
 export interface SessionFilesData {
   root: string;
   files: FileEntry[];
