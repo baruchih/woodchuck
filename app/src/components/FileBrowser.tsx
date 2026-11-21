@@ -3,6 +3,7 @@ import { marked } from 'marked';
 import { api } from '../api/client';
 import { buildPreviewHtml } from '../utils/htmlPreview';
 import { saveDownloadOnClick } from '../utils/saveDownload';
+import { ShareButton } from './ShareButton';
 import type { FileEntry } from '../types';
 
 interface FileBrowserProps {
@@ -23,6 +24,9 @@ const VIEWABLE_EXTENSIONS = new Set([
   'env', 'gitignore', 'gitattributes', 'editorconfig', 'eslintrc', 'prettierrc',
   'lock', 'log', 'csv', 'tsv',
 ]);
+
+// Sharing loads the whole file into memory first, so very large files are download-only
+const MAX_SHARE_SIZE = 200 * 1024 * 1024;
 
 function isViewable(name: string): boolean {
   // Files without extensions like Makefile, Dockerfile, etc.
@@ -364,6 +368,13 @@ function FileNode({
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
           </a>
+          {/* Share folder as zip */}
+          <ShareButton
+            asSpan
+            url={`/api/sessions/${encodeURIComponent(sessionId)}/download-folder?path=${encodeURIComponent(entry.path)}`}
+            name={`${entry.name}.zip`}
+            className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+          />
           {loading && (
             <svg className="w-3 h-3 animate-spin text-text-muted ml-auto shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -439,6 +450,10 @@ function FileNode({
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
       </a>
+      {/* Share button */}
+      {(entry.size == null || entry.size <= MAX_SHARE_SIZE) && (
+        <ShareButton url={downloadUrl} name={entry.name} isText={isViewable(entry.name)} className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100" />
+      )}
       {entry.size != null && (
         <span className="text-[10px] text-text-muted shrink-0">{formatSize(entry.size)}</span>
       )}
@@ -607,6 +622,8 @@ function FileViewer({
             <a
               href={downloadUrl}
               download={name}
+              aria-label={`Download ${name}`}
+              title="Download"
               onClick={saveDownloadOnClick(downloadUrl, name)}
               className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
             >
@@ -615,8 +632,9 @@ function FileViewer({
                 <polyline points="7 10 12 15 17 10" />
                 <line x1="12" y1="15" x2="12" y2="3" />
               </svg>
-              Download
+              <span className="hidden sm:inline">Download</span>
             </a>
+            <ShareButton url={downloadUrl} name={name} isText variant="labeled" />
           </div>
         </div>
       </div>
@@ -781,6 +799,8 @@ function ImageViewer({
           <a
             href={imgUrl}
             download={name}
+            aria-label={`Download ${name}`}
+            title="Download"
             onClick={saveDownloadOnClick(imgUrl, name)}
             className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors"
           >
@@ -789,8 +809,9 @@ function ImageViewer({
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            Download
+            <span className="hidden sm:inline">Download</span>
           </a>
+          <ShareButton url={imgUrl} name={name} variant="labeled" />
         </div>
       </div>
 
@@ -905,19 +926,22 @@ function MediaViewer({
           </button>
           <span className="text-sm font-medium text-text truncate">{name}</span>
         </div>
-        <a
-          href={downloadUrl}
-          download={name}
-          onClick={saveDownloadOnClick(downloadUrl, name)}
-          className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors shrink-0"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Download
-        </a>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <a
+            href={downloadUrl}
+            download={name}
+            onClick={saveDownloadOnClick(downloadUrl, name)}
+            className="flex items-center gap-1 px-2 py-1 rounded border border-border text-[11px] font-medium text-text-muted hover:text-primary hover:border-primary transition-colors shrink-0"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Download
+          </a>
+          <ShareButton url={downloadUrl} name={name} variant="labeled" />
+        </div>
       </div>
 
       {/* Player */}
