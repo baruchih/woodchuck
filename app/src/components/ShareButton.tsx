@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { MouseEvent, KeyboardEvent } from 'react';
-import { canShareFiles, fetchShareableFile } from '../utils/shareFile';
+import { adaptForBrowser, canShareFiles, fetchShareableFile } from '../utils/shareFile';
 
 interface ShareButtonProps {
   /** Server URL that returns the file's bytes */
@@ -17,6 +17,10 @@ interface ShareButtonProps {
 }
 
 type Phase = 'idle' | 'loading' | 'ready' | 'error';
+
+// A share refused this soon after the tap was refused for the file itself, not
+// because the tap expired (Safari allows about a second after a tap)
+const TAP_EXPIRY_MS = 1000;
 
 function downloadFile(file: File) {
   const href = URL.createObjectURL(file);
@@ -43,8 +47,24 @@ export function ShareButton({ url, name, isText = false, variant = 'icon', asSpa
   const [phase, setPhase] = useState<Phase>('idle');
   const [readyFile, setReadyFile] = useState<File | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Short visible note on the button (the full message is in the tooltip)
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const share = useCallback(async (file: File) => {
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  const fallBackToDownload = useCallback((file: File) => {
+    downloadFile(file);
+    setPhase('idle');
+    setReadyFile(null);
+    setMessage("This browser can't share this file type, so it was downloaded");
+    setNotice('Downloaded instead');
+  }, []);
+
+  const share = useCallback(async (file: File, tappedAt: number, isRetry: boolean) => {
     try {
       await navigator.share({ files: [file] });
       setPhase('idle');
@@ -55,45 +75,50 @@ export function ShareButton({ url, name, isText = false, variant = 'icon', asSpa
         // Share sheet dismissed
         setPhase('idle');
         setReadyFile(null);
-      } else if (errName === 'NotAllowedError') {
-        // Fetching took too long and the browser no longer counts this as a tap
-        // (Safari). Keep the file so the next tap shares it immediately.
+      } else if (errName === 'NotAllowedError' && !isRetry && Date.now() - tappedAt > TAP_EXPIRY_MS) {
+        // Loading took too long and the browser no longer counts this as a tap.
+        // Keep the file so the next tap shares it immediately.
         setReadyFile(file);
         setPhase('ready');
+      } else if (errName === 'NotAllowedError') {
+        // Refused right away, or again on a fresh tap: the browser won't share this file
+        fallBackToDownload(file);
       } else {
         setPhase('error');
         setMessage(`Share failed: ${(err as Error).message}`);
+        setNotice('Share failed');
       }
     }
-  }, []);
+  }, [fallBackToDownload]);
 
   const handleActivate = useCallback(async (e: MouseEvent | KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
     if (phase === 'loading') return;
+    const tappedAt = Date.now();
     if (readyFile) {
-      await share(readyFile);
+      await share(readyFile, tappedAt, true);
       return;
     }
     setPhase('loading');
     setMessage(null);
+    setNotice(null);
     let file: File;
     try {
       file = await fetchShareableFile(url, name, isText);
     } catch (err) {
       setPhase('error');
       setMessage(`Couldn't load file: ${(err as Error).message}`);
+      setNotice("Couldn't load file");
       return;
     }
-    if (!navigator.canShare({ files: [file] })) {
-      // This browser won't share this file type; save it instead
-      downloadFile(file);
-      setPhase('idle');
-      setMessage("This browser can't share this file type, so it was downloaded");
+    const shareable = adaptForBrowser(file, isText);
+    if (!shareable || !navigator.canShare({ files: [shareable] })) {
+      fallBackToDownload(file);
       return;
     }
-    await share(file);
-  }, [phase, readyFile, url, name, isText, share]);
+    await share(shareable, tappedAt, false);
+  }, [phase, readyFile, url, name, isText, share, fallBackToDownload]);
 
   if (!canShareFiles()) return null;
 
@@ -112,7 +137,9 @@ export function ShareButton({ url, name, isText = false, variant = 'icon', asSpa
       ) : (
         <ShareIcon className={iconClass} />
       )}
-      {phase === 'ready' ? (
+      {notice ? (
+        <span className="whitespace-nowrap">{notice}</span>
+      ) : phase === 'ready' ? (
         <span>{label}</span>
       ) : variant === 'labeled' && (
         // Viewer headers are tight on phones: icon only there

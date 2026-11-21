@@ -57,3 +57,34 @@ export async function fetchShareableFile(url: string, name: string, isText: bool
   const blob = await res.blob();
   return new File([blob], name, { type: mimeForName(name, isText) });
 }
+
+// Chromium (Chrome, Edge, Brave on desktop and Android) only shares these
+// extensions and rejects anything else with a NotAllowedError, even though
+// canShare() says yes. Safari has no such list.
+const CHROMIUM_SHAREABLE_EXTENSIONS = new Set([
+  'bmp', 'css', 'csv', 'ehtml', 'flac', 'gif', 'htm', 'html', 'ico', 'jfif', 'jpeg', 'jpg',
+  'm4a', 'm4v', 'mp3', 'mp4', 'mpeg', 'mpg', 'oga', 'ogg', 'ogm', 'ogv', 'opus', 'pdf', 'pjp',
+  'pjpeg', 'png', 'shtm', 'shtml', 'svg', 'svgz', 'text', 'tif', 'tiff', 'txt', 'wav', 'weba',
+  'webm', 'webp', 'xbm',
+]);
+
+interface UADataNavigator {
+  userAgentData?: { brands?: { brand: string }[] };
+}
+
+function isChromium(): boolean {
+  return !!(navigator as unknown as UADataNavigator).userAgentData?.brands?.some((b) => b.brand === 'Chromium');
+}
+
+/**
+ * Adapt a file to what this browser will actually share. In Chromium, text files
+ * with other extensions (.md, .json, code) go out as "name.ext.txt"; other
+ * types can't be shared there at all, and null is returned.
+ */
+export function adaptForBrowser(file: File, isText: boolean): File | null {
+  if (!isChromium()) return file;
+  const ext = file.name.toLowerCase().includes('.') ? file.name.toLowerCase().split('.').pop()! : '';
+  if (CHROMIUM_SHAREABLE_EXTENSIONS.has(ext)) return file;
+  if (isText) return new File([file], `${file.name}.txt`, { type: 'text/plain' });
+  return null;
+}
